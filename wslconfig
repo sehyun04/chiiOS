@@ -1,0 +1,7 @@
+# chiiOS: 봇과 브라우저 터미널이 WSL 창 없이도 살아 있게, 할 일이 없어도 Debian 을 끄지 않는다.
+[general]
+instanceIdleTimeout=-1
+
+[wsl2]
+# 계속 켜 두는 만큼 노트북 메모리(32GB)의 절반을 가져가는 기본값 대신 상한을 둔다. 봇 몇 개엔 넉넉하다.
+memory=8GB

@@ -1,0 +1,5 @@
+* text=auto
+# Windows 에서 clone 하면 줄 끝이 CRLF 로 바뀔 수 있는데, bash 는 \r 을 명령의 일부로 읽어 깨진다.
+*.sh text eol=lf
+# install.ps1 이 ~/.wslconfig 와 해시로 비교하므로 줄 끝이 바뀌면 안 된다.
+wslconfig text eol=lf
