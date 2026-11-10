@@ -90,6 +90,12 @@ if ! /usr/local/bin/ttyd --version 2>/dev/null | grep -q "$TTYD_VERSION"; then
   install -m 0755 "$tmp" /usr/local/bin/ttyd
   rm -f "$tmp"
 fi
+# 치이스페(kasaspace/ui/Term.tsx)의 밝은 터미널 색을 그대로 쓴다. 파스텔은 크림 바탕에서 안 읽혀
+# 명도를 내린 값들이다. 다만 magenta 는 보라라서 쓰지 않기로 했고, 그 자리에 코코아를 넣었다.
+TTYD_THEME='{"background":"#fbf5ea","foreground":"#5b4433","cursor":"#6b5442","cursorAccent":"#fbf5ea","selectionBackground":"#f3bfc355","black":"#5b4433","red":"#c34741","green":"#4f7b4d","yellow":"#8a6d26","blue":"#2f77a1","magenta":"#96663d","cyan":"#38798b","white":"#836d5a","brightBlack":"#8f775c","brightRed":"#be2b22","brightGreen":"#3d703b","brightYellow":"#7e6003","brightBlue":"#196a99","brightMagenta":"#7f5530","brightCyan":"#1d6d83","brightWhite":"#5b4433"}'
+# 글꼴은 보는 쪽 브라우저가 가진 것만 쓸 수 있다. 치이스페와 같은 D2Coding 계열을 먼저 찾고, 없으면 Windows 기본 등폭으로.
+# 따옴표로 시작하면 ttyd 가 값을 JSON 으로 읽어 첫 글꼴만 남기므로 따옴표 없이 쓴다(CSS 는 그래도 된다).
+TTYD_FONT='D2KodingLigature Nerd Font, D2Coding, Cascadia Mono, Consolas, monospace'
 cat > /etc/systemd/system/chii-term.service <<EOF
 [Unit]
 Description=chiiOS browser terminal
@@ -101,7 +107,9 @@ WorkingDirectory=/home/$CHII_USER
 # 127.0.0.1 에만 묶는다. 브라우저 터미널은 셸을 통째로 내주는 것이라,
 # 다른 기기에서 열려면 Tailscale 같은 인증 뒤에 둔 다음에 바꾼다.
 # ttyd 1.7 부터는 기본이 읽기 전용이라 --writable 이 있어야 입력이 들어간다.
-ExecStart=/usr/local/bin/ttyd --interface 127.0.0.1 --port $TTYD_PORT --writable -t titleFixed=chiiOS bash -l
+# 그리기는 DOM 으로 둔다. 기본값 WebGL 은 화면 배율이 어긋나면(시험 브라우저에서 1.25 와 1) 캔버스가
+# 아래로 밀려 위쪽 다섯 줄쯤이 비었다. DOM 은 그런 일이 없고 이 정도 출력엔 충분히 빠르다.
+ExecStart=/usr/local/bin/ttyd --interface 127.0.0.1 --port $TTYD_PORT --writable -t titleFixed=chiiOS -t rendererType=dom -t fontSize=15 -t lineHeight=1.25 -t cursorBlink=true -t 'fontFamily=$TTYD_FONT' -t 'theme=$TTYD_THEME' bash -l
 Restart=always
 
 [Install]
@@ -110,6 +118,48 @@ EOF
 systemctl daemon-reload
 systemctl enable chii-term.service
 systemctl restart chii-term.service
+
+step "셸 꾸밈 (프롬프트, 로그인 요약)"
+install -d /etc/chiios
+cat > /etc/chiios/bashrc <<'EOF'
+# chiiOS 셸 꾸밈. setup.sh 가 쓰는 파일이라 여기를 고쳐도 다음 실행 때 덮인다.
+case $- in *i*) ;; *) return ;; esac
+
+PS1='\[\e[1;34m\]\u@\h\[\e[0m\]:\w\$ '
+
+# 로그인할 때만 요약을 보인다. 셸 안에서 bash 를 또 띄울 때마다 찍히면 시끄럽다.
+chii_summary() {
+  local up mins os mem disk bots states all run
+  read -r up _ < /proc/uptime
+  mins=$(( ${up%.*} / 60 ))
+  if (( mins < 60 )); then up="${mins}분째"
+  elif (( mins < 1440 )); then up="$(( mins / 60 ))시간째"
+  else up="$(( mins / 1440 ))일째"
+  fi
+  os=$(. /etc/os-release && echo "${NAME%% *} $VERSION_ID ($VERSION_CODENAME)")
+  mem=$(awk '/^MemTotal/ {t=$2} /^MemAvailable/ {a=$2} END {printf "%.1f / %.1f GB", (t-a)/1048576, t/1048576}' /proc/meminfo)
+  disk=$(df -h --output=used / | tail -n 1 | tr -d ' ')
+  # 봇은 compose 로 띄운 컨테이너다. docker 가 늦게 답해도 로그인이 붙잡히지 않게 2초에서 끊는다.
+  bots=""
+  if states=$(timeout 2 docker ps -a --filter label=com.docker.compose.project --format '{{.State}}' 2>/dev/null); then
+    all=$(grep -c . <<<"$states")
+    run=$(grep -c '^running$' <<<"$states")
+    bots="봇 ${all}개 (일하는 중 ${run} · 쉬는 중 $(( all - run ))) · "
+  fi
+  # 색은 터미널 테마와 상관없이 같게 보이도록 24비트로 직접 준다(코코아, 흐린 갈색).
+  printf '\n  \e[1;38;2;150;102;61mchiiOS\e[0m · %s · %s 깨어 있음\n' "$os" "$up"
+  printf '  \e[38;2;136;113;88m%s메모리 %s · 디스크 %s 씀\e[0m\n\n' "$bots" "$mem" "$disk"
+}
+shopt -q login_shell && chii_summary
+unset -f chii_summary
+EOF
+# 사용자 ~/.bashrc 가 PS1 을 다시 정하므로, 그 끝에서 위 파일을 불러야 덮어쓴다.
+bashrc_hook='[ -f /etc/chiios/bashrc ] && . /etc/chiios/bashrc'
+user_bashrc="/home/$CHII_USER/.bashrc"
+if ! grep -qxF "$bashrc_hook" "$user_bashrc" 2>/dev/null; then
+  printf '\n# chiiOS\n%s\n' "$bashrc_hook" >> "$user_bashrc"
+  chown "$CHII_USER:$CHII_USER" "$user_bashrc"
+fi
 
 step "확인"
 docker --version
