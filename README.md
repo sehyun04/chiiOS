@@ -6,9 +6,12 @@
 
 - Debian 13 (trixie), systemd
 - Docker Engine + Compose 플러그인 (Docker 공식 저장소)
-- 브라우저 터미널: ttyd 1.7.7, `http://localhost:7681`
+- 홈 화면: `http://localhost:7682` (`chii-home.service`, `home/`). 터미널·봇·오늘 할 일·오늘 기록 네 칸과 아래 상태줄
+- 브라우저 터미널: ttyd 1.7.7, `http://localhost:7681` (`chii-term.service`). 홈 화면 1번 칸에도 뜬다
 - 사용자 `sehyun`, 호스트 이름 `chiios`
 - 꺼진 Debian 을 다시 켜는 작업 스케줄러 작업 `chiiOS`
+
+겉모습은 치이스페(`kasaspace`)의 색·글꼴·얼굴 그림을 그대로 쓴다. 봇은 봇 이름 그대로 두고, 캐릭터는 할 일 칸과 상태줄 말풍선의 꾸밈으로만 쓴다.
 
 ## 새 PC 에 설치
 
@@ -42,7 +45,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 | 하려는 것 | 방법 |
 |---|---|
-| 브라우저 터미널 열기 | `start.cmd` 더블클릭 (꺼져 있으면 켜고 연다) |
+| 홈 화면 열기 | `start.cmd` 더블클릭 (꺼져 있으면 켜고 연다) |
+| 칸 옮기기 | 홈 화면에서 `Alt+1~4` (터미널 안에서는 키가 셸로 가므로 칸을 한 번 눌러 밖으로 나온다) |
 | 터미널로 들어가기 | `wsl -d Debian` |
 | Debian 안 설정만 다시 적용 | 이 폴더에서 `wsl -d Debian -u root -- bash ./setup.sh` |
 | 끄기 | `wsl --terminate Debian` (WSL 전체는 `wsl --shutdown`). 자동 켜기가 걸려 있으면 5분 안에 다시 켜진다 |
@@ -62,12 +66,14 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 |---|---|---|
 | 니나브(loa-bot) | Debian 안 `~/loa-bot` | 이미지만 있고 꺼 둔다 |
 
-- 준비·갱신: 이 폴더에서 `wsl -d Debian -- bash ./bots/loa-bot.sh`. Windows 쪽 loa-bot 의 커밋된 코드와 `.env` 를 가져와 이미지를 굽는다. 띄우지는 않는다. loa-bot 이 노트북과 다른 곳에 있으면 `LOA_SRC=/mnt/c/...` 로 알려 준다.
-- 디스코드 토큰이 Oracle 운영 봇과 같다. 둘이 같이 켜지면 인터랙션이 두 쪽으로 갈려 응답이 꼬이므로, 운영을 멈춘 동안에만 켠다.
+- 홈 화면 봇 칸의 단추: 깨우기·재우기(`docker compose up -d`·`stop`), 다시 굽기(`bots/<봇>.sh`), 기록(`docker logs` 마지막 300줄).
+- 봇 이름과 깨우기 전 주의 문구는 `bots/bots.json` 에 둔다. 주의 문구가 있는 봇은 깨우기를 누르면 확인 창이 먼저 뜬다.
+- 준비·갱신을 손으로 하려면 이 폴더에서 `wsl -d Debian -- bash ./bots/loa-bot.sh`. Windows 쪽 loa-bot 의 커밋된 코드와 `.env` 를 가져와 이미지를 굽는다. 띄우지는 않는다. loa-bot 이 노트북과 다른 곳에 있으면 `LOA_SRC=/mnt/c/...` 로 알려 준다.
+- 디스코드 토큰이 Oracle 운영 봇과 같다. 둘이 같이 켜지면 인터랙션이 두 쪽으로 갈려 응답이 꼬이므로, 운영을 멈춘 동안에만 켠다. 홈 화면의 확인 창은 묻기만 하고 Oracle 을 재우지는 않는다.
   1. `ssh loa docker stop loa-bot`
-  2. Debian 에서 `cd ~/loa-bot && docker compose up -d` (끄기는 `docker compose stop`)
-  3. `ssh loa docker start loa-bot`
-- 켜 둔 채로 두면 `restart: unless-stopped` 라 Debian 이 다시 켜질 때 같이 살아나 운영과 겹친다. 다 쓰면 꼭 `stop` 한다.
+  2. 홈 화면에서 깨우기 (또는 Debian 에서 `cd ~/loa-bot && docker compose up -d`)
+  3. 다 쓰면 재우기, 그다음 `ssh loa docker start loa-bot`
+- 켜 둔 채로 두면 `restart: unless-stopped` 라 Debian 이 다시 켜질 때 같이 살아나 운영과 겹친다. 다 쓰면 꼭 재운다.
 
 ## `wslconfig` (Windows 쪽 WSL 전역 설정)
 
@@ -78,5 +84,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ## 주의
 
-- 브라우저 터미널은 `127.0.0.1` 에만 열려 있다. 셸을 통째로 내주는 것이라 다른 기기에서 열려면 Tailscale 같은 인증을 먼저 둔다.
+- 브라우저 터미널과 홈 화면은 `127.0.0.1` 에만 열려 있다. 셸과 봇 단추를 통째로 내주는 것이라 다른 기기에서 열려면 Tailscale 같은 인증을 먼저 둔다.
+- 다른 사이트가 몰래 요청하지 못하게, 홈 화면은 `localhost` 이름으로 온 요청만 받고 바꾸는 요청(POST)에는 `X-Chii: 1` 머리글을 요구한다. ttyd 는 `--check-origin` 으로 다른 출처의 웹소켓을 막는다.
+- 홈 화면이 7680 이 아니라 7682 인 이유: 7680 은 Windows 배달 최적화(DoSvc)가 쥐고 있어 Windows 쪽 `localhost:7680` 이 Debian 까지 오지 않는다.
+- 할 일과 홈 화면이 받아 적은 기록은 Debian 안 `~/.local/share/chiios/` 에 있다. 재부팅 기록은 systemd 저널에서 읽는다.
 - WSL 에서는 sudo 비밀번호를 없앴다. Windows 계정이면 어차피 `wsl -u root` 로 root 가 되기 때문이다. WSL 이 아닌 순정 Debian 에 깔면 `setup.sh` 가 이 설정을 건너뛴다.

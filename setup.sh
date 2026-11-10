@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# chiiOS: 순정 Debian 13 위에 봇 실행 환경(Docker)과 브라우저 터미널(ttyd)을 얹는다.
+# chiiOS: 순정 Debian 13 위에 봇 실행 환경(Docker)과 브라우저 터미널(ttyd), 홈 화면을 얹는다.
 # 지금은 WSL 에서 연습하고 나중에 i7 PC 실기에도 그대로 돌릴 거라, WSL 전용 처리는 is_wsl 안에만 둔다.
 # 몇 번을 다시 돌려도 결과가 같게 짰다. 설정을 바꾸면 이 파일을 고치고 다시 돌리면 된다.
 #
@@ -10,7 +10,10 @@ set -euo pipefail
 CHII_USER="${CHII_USER:-sehyun}"
 CHII_HOST="${CHII_HOST:-chiios}"
 TTYD_PORT="${TTYD_PORT:-7681}"
+# 7680 은 Windows 배달 최적화(DoSvc)가 쥐고 있어서 Windows 쪽 localhost 로는 닿지 않는다.
+HOME_PORT="${HOME_PORT:-7682}"
 TTYD_VERSION=1.7.7
+CHII_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "root 로 실행해야 한다: sudo bash setup.sh" >&2
@@ -53,7 +56,7 @@ fi
 
 step "기본 패키지"
 apt-get update -q
-apt-get install -y -q ca-certificates curl git htop
+apt-get install -y -q ca-certificates curl git htop python3
 
 step "Docker"
 # Debian 저장소의 docker.io 대신 Docker 공식 저장소를 쓴다. compose v2 플러그인이 같이 오고 업데이트가 빠르다.
@@ -109,7 +112,9 @@ WorkingDirectory=/home/$CHII_USER
 # ttyd 1.7 부터는 기본이 읽기 전용이라 --writable 이 있어야 입력이 들어간다.
 # 그리기는 DOM 으로 둔다. 기본값 WebGL 은 화면 배율이 어긋나면(시험 브라우저에서 1.25 와 1) 캔버스가
 # 아래로 밀려 위쪽 다섯 줄쯤이 비었다. DOM 은 그런 일이 없고 이 정도 출력엔 충분히 빠르다.
-ExecStart=/usr/local/bin/ttyd --interface 127.0.0.1 --port $TTYD_PORT --writable -t titleFixed=chiiOS -t rendererType=dom -t fontSize=15 -t lineHeight=1.25 -t cursorBlink=true -t 'fontFamily=$TTYD_FONT' -t 'theme=$TTYD_THEME' bash -l
+# --check-origin: 다른 사이트의 페이지가 이 터미널 웹소켓에 몰래 붙지 못하게 한다. 홈 화면의 터미널 칸은
+# ttyd 페이지를 그대로 띄우는 것이라 출처가 같아 문제없다.
+ExecStart=/usr/local/bin/ttyd --interface 127.0.0.1 --port $TTYD_PORT --writable --check-origin -t titleFixed=chiiOS -t disableResizeOverlay=true -t rendererType=dom -t fontSize=15 -t lineHeight=1.25 -t cursorBlink=true -t 'fontFamily=$TTYD_FONT' -t 'theme=$TTYD_THEME' bash -l
 Restart=always
 
 [Install]
@@ -161,13 +166,42 @@ if ! grep -qxF "$bashrc_hook" "$user_bashrc" 2>/dev/null; then
   chown "$CHII_USER:$CHII_USER" "$user_bashrc"
 fi
 
+step "홈 화면 (포트 $HOME_PORT)"
+# Windows 쪽 폴더(/mnt/c)에서 바로 돌리지 않고 Debian 안으로 복사해 둔다. 레포를 옮기거나 지워도
+# 홈 화면이 살아 있어야 하고, 무엇이 돌고 있는지는 마지막으로 돌린 setup.sh 가 정한다.
+install -d /opt/chiios
+rm -rf /opt/chiios/home /opt/chiios/bots
+cp -r "$CHII_DIR/home" "$CHII_DIR/bots" /opt/chiios/
+cat > /etc/systemd/system/chii-home.service <<EOF
+[Unit]
+Description=chiiOS home screen
+After=network.target docker.service chii-term.service
+Wants=docker.service
+
+[Service]
+# 봇을 깨우고 재우려면 docker 그룹이 필요하다. 그 그룹은 $CHII_USER 에게 이미 있다.
+User=$CHII_USER
+WorkingDirectory=/home/$CHII_USER
+Environment=CHII_HOME_PORT=$HOME_PORT CHII_TERM_PORT=$TTYD_PORT
+# 터미널 칸처럼 127.0.0.1 에만 묶는다. 봇을 깨우고 재우는 단추가 있는 화면이다.
+ExecStart=/usr/bin/python3 /opt/chiios/home/server.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable chii-home.service
+systemctl restart chii-home.service
+
 step "확인"
 docker --version
 docker compose version
 ttyd --version
-systemctl is-active docker chii-term
+systemctl is-active docker chii-term chii-home
 if is_wsl; then
   echo
   echo "wsl.conf 를 바꿨으면 Windows 에서 'wsl --terminate Debian' 뒤 다시 켜야 기본 사용자·호스트 이름이 적용된다."
 fi
+echo "홈 화면: http://localhost:$HOME_PORT"
 echo "브라우저 터미널: http://localhost:$TTYD_PORT"
