@@ -12,10 +12,19 @@
 
 ## 새 PC 에 설치
 
+git 이 없는 PC 면 먼저 깐다(UAC 창이 뜬다). 깐 뒤 PATH 를 다시 읽어야 같은 창에서 `git` 이 잡힌다.
+
 ```powershell
-git clone https://github.com/sehyun04/chiiOS.git
-cd chiiOS
-powershell -ExecutionPolicy Bypass -File install.ps1
+winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+```
+
+그다음 받아서 깐다. 비공개 레포라 clone 때 GitHub 로그인 창이 한 번 뜬다.
+
+```powershell
+git clone https://github.com/sehyun04/chiiOS.git $HOME\chiiOS
+cd $HOME\chiiOS
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 `install.ps1` 이 하는 일, 순서대로:
