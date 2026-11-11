@@ -112,24 +112,30 @@
     pending = requestAnimationFrame(() => { if (host.clientWidth && host.clientHeight) fit.fit(); });
   }).observe(host);
 
-  let opened = false;
-  window.chiiTerm = {
-    focus: () => {
-      if (!cover.hidden) reopenBtn.focus();
-      else if (opened) term.focus();
-    },
-    setTheme: (isNight) => { term.options.theme = isNight ? NIGHT : DAY; },
-  };
-
   // 글꼴이 다 오기 전에 열면 xterm 이 대체 글꼴로 칸 폭을 재서 줄이 어긋난다. 늦어도 3초 뒤에는 연다.
   const fonts = Promise.all([
     document.fonts.load('15px "chii-mono"'),
     document.fonts.load('bold 15px "chii-mono"'),
   ]).catch(() => {});
-  Promise.race([fonts, new Promise((r) => setTimeout(r, 3000))]).then(() => {
-    term.open(host);
-    opened = true;
-    fit.fit();
-    connect();
-  });
+  const fontsReady = Promise.race([fonts, new Promise((r) => setTimeout(r, 3000))]);
+
+  // 숨은 탭 안에서 열면 xterm 이 칸 크기를 0 으로 재서 글자 폭이 틀어진다. 터미널 탭이 처음 보일 때 연다.
+  // 셸도 그때 띄우므로, 비서만 쓰는 날엔 bash 가 뜨지 않는다.
+  let opening = null;
+  function show() {
+    if (!opening) {
+      opening = fontsReady.then(() => {
+        term.open(host);
+        fit.fit();
+        connect();
+      });
+    }
+    return opening;
+  }
+
+  window.chiiTerm = {
+    show,
+    focus: () => show().then(() => (cover.hidden ? term.focus() : reopenBtn.focus())),
+    setTheme: (isNight) => { term.options.theme = isNight ? NIGHT : DAY; },
+  };
 })();

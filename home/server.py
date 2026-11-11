@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # chiiOS 홈 화면. 봇·할 일·기록을 보여 주고, 터미널 칸은 ttyd 웹소켓을 이어 받아 직접 그린다.
 # 표준 라이브러리만 쓴다. 봇 돌리는 기계에 pip 패키지를 들이면 setup.sh 가 챙길 것이 늘고 업데이트 때 깨질 곳도 는다.
+# 예외는 비서(assistant.py)의 Anthropic SDK 하나다. setup.sh 가 venv 에 판을 고정해 깔고, 없으면 비서만 꺼진다.
 import json
 import os
 import re
@@ -216,6 +217,66 @@ def visible_todos():
     return [t for t in load_todos() if not t.get("done") or (t.get("doneAt") or 0) >= since]
 
 
+def add_todo(text):
+    text = str(text or "").strip()[:200]
+    if not text:
+        return None
+    item = {"id": uuid.uuid4().hex[:8], "text": text, "done": False, "createdAt": time.time(), "doneAt": None}
+    with lock:
+        items = load_todos()
+        items.append(item)
+        save_todos(items)
+    return item
+
+
+def change_todo(tid, op, done=None):
+    """op 는 toggle·set·delete. 바뀐 항목을 돌려주고, 없으면 None."""
+    found = finished = None
+    with lock:
+        items = load_todos()
+        for t in items:
+            if t["id"] != tid:
+                continue
+            found = t
+            if op == "delete":
+                items.remove(t)
+            else:
+                new = (not t["done"]) if op == "toggle" else bool(done)
+                if new and not t["done"]:
+                    finished = t["text"]
+                t["done"] = new
+                t["doneAt"] = (t.get("doneAt") or time.time()) if new else None
+            break
+        if found:
+            save_todos(items)
+    if finished:
+        log_event("todo", f"할 일 끝 · {finished}")
+    return found
+
+
+def bot_act(bot, act):
+    if act == "start":
+        code, _ = sh(["docker", "compose", "--project-directory", bot["dir"], "up", "-d"], timeout=180)
+    elif act == "stop":
+        code, _ = sh(["docker", "compose", "--project-directory", bot["dir"], "stop"], timeout=120)
+    elif act == "bake" and bot["canBake"]:
+        bake(bot)
+        code = 0
+    else:
+        code = 1
+    return code == 0
+
+
+def bot_logs(bot, tail):
+    # 봇이 제 기록에 시각을 이미 찍으므로 docker 시각(--timestamps)은 붙이지 않는다.
+    try:
+        p = subprocess.run(["docker", "logs", "--tail", str(int(tail)), bot["container"]],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=10)
+        return p.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
 def events():
     since = day_start()
     out = []
@@ -356,11 +417,9 @@ class Handler(BaseHTTPRequestHandler):
             if not bot:
                 return self.send_json({"error": "그런 봇이 없다"}, 404)
             tail = parse_qs(u.query).get("tail", ["200"])[0]
-            tail = tail if tail.isdigit() else "200"
-            # 봇이 제 기록에 시각을 이미 찍으므로 docker 시각(--timestamps)은 붙이지 않는다.
-            p = subprocess.run(["docker", "logs", "--tail", tail, bot["container"]],
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=10)
-            return self.send_json({"name": bot["name"], "text": p.stdout})
+            return self.send_json({"name": bot["name"], "text": bot_logs(bot, tail if tail.isdigit() else 200)})
+        if u.path == "/api/assistant":
+            return self.send_json(ASSIST.status())
         return self.static(u.path)
 
     def static(self, path):
@@ -423,50 +482,61 @@ class Handler(BaseHTTPRequestHandler):
             if not bot:
                 return self.send_json({"error": "그런 봇이 없다"}, 404)
             act = m.group(2)
-            if act == "start":
-                if bot["guard"] and not data.get("confirm"):
-                    return self.send_json({"guard": bot["guard"]}, 409)
-                code, out = sh(["docker", "compose", "--project-directory", bot["dir"], "up", "-d"], timeout=180)
-            elif act == "stop":
-                code, out = sh(["docker", "compose", "--project-directory", bot["dir"], "stop"], timeout=120)
-            else:
-                if not bot["canBake"]:
-                    return self.send_json({"error": "굽는 스크립트가 없다"}, 400)
-                bake(bot)
-                code = 0
-            return self.send_json({"ok": code == 0}, 200 if code == 0 else 500)
+            if act == "start" and bot["guard"] and not data.get("confirm"):
+                return self.send_json({"guard": bot["guard"]}, 409)
+            if act == "bake" and not bot["canBake"]:
+                return self.send_json({"error": "굽는 스크립트가 없다"}, 400)
+            ok = bot_act(bot, act)
+            return self.send_json({"ok": ok}, 200 if ok else 500)
 
         if u.path == "/api/todos":
-            text = str(data.get("text", "")).strip()[:200]
-            if not text:
+            if not add_todo(data.get("text")):
                 return self.send_json({"error": "빈 할 일"}, 400)
-            with lock:
-                items = load_todos()
-                items.append({"id": uuid.uuid4().hex[:8], "text": text, "done": False,
-                              "createdAt": time.time(), "doneAt": None})
-                save_todos(items)
             return self.send_json({"ok": True})
 
         m = re.fullmatch(r"/api/todos/(\w+)/(toggle|delete)", u.path)
         if m:
-            done_text = None
-            with lock:
-                items = load_todos()
-                for t in items:
-                    if t["id"] == m.group(1):
-                        if m.group(2) == "delete":
-                            items.remove(t)
-                        else:
-                            t["done"] = not t["done"]
-                            t["doneAt"] = time.time() if t["done"] else None
-                            done_text = t["text"] if t["done"] else None
-                        break
-                save_todos(items)
-            if done_text:
-                log_event("todo", f"할 일 끝 · {done_text}")
+            change_todo(m.group(1), m.group(2))
             return self.send_json({"ok": True})
 
+        if u.path == "/api/assistant/key":
+            ok, err = ASSIST.save_key(data.get("key"))
+            return self.send_json({"ok": True} if ok else {"error": err}, 200 if ok else 400)
+        if u.path == "/api/assistant/clear":
+            ASSIST.clear()
+            return self.send_json({"ok": True})
+        if u.path == "/api/assistant/chat":
+            return self.assistant_chat(str(data.get("text", "")).strip()[:4000])
+
         return self.send_error(404)
+
+    def assistant_chat(self, text):
+        if not text:
+            return self.send_json({"error": "빈 말"}, 400)
+        # 답을 글자가 나오는 대로 한 줄짜리 JSON 으로 흘려보낸다. 길이를 모르니 끝은 연결을 닫아 알린다(HTTP/1.0).
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.close_connection = True
+
+        def emit(obj):
+            try:
+                self.wfile.write((json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+            except OSError:
+                # 화면을 닫아도 대화는 끝까지 가서 기록에 남는다. 다음에 열면 보인다.
+                pass
+
+        ASSIST.chat(text, emit)
+
+
+import assistant  # noqa: E402  위 함수들을 비서의 도구로 넘겨야 해서 여기서 부른다.
+
+ASSIST = assistant.Assistant(STATE_DIR, assistant.World(
+    system_info=system_info, services=services, bots=bots, find_bot=find_bot,
+    todos=visible_todos, events=events, add_todo=add_todo, change_todo=change_todo,
+    bot_act=bot_act, bot_logs=bot_logs,
+))
 
 
 def main():

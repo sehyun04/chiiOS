@@ -6,8 +6,9 @@
 
 - Debian 13 (trixie), systemd
 - Docker Engine + Compose 플러그인 (Docker 공식 저장소)
-- 홈 화면: `http://localhost:7682` (`chii-home.service`, `home/`). 터미널·봇·오늘 할 일·오늘 기록 네 칸과 아래 상태줄, 낮·밤 두 벌
-- 브라우저 터미널: ttyd 1.7.7, `http://localhost:7681` (`chii-term.service`). 홈 화면 1번 칸은 이 ttyd 에 웹소켓으로 붙어 xterm 으로 직접 그린다
+- 홈 화면: `http://localhost:7682` (`chii-home.service`, `home/`). 1번 [비서][터미널] 칸·봇·오늘 할 일·오늘 기록 네 칸과 아래 상태줄, 낮·밤 두 벌
+- 비서: 홈 화면 1번 칸 [비서] 탭. 오늘 정리, 할 일 관리, 봇 돌보기를 말로 한다(아래 '비서')
+- 브라우저 터미널: ttyd 1.7.7, `http://localhost:7681` (`chii-term.service`). 홈 화면 1번 칸 [터미널] 탭은 이 ttyd 에 웹소켓으로 붙어 xterm 으로 직접 그린다
 - 바탕화면·시작 메뉴의 `chiiOS` 바로가기: 홈 화면을 주소창 없는 Edge 앱 창으로 연다
 - 사용자 `sehyun`, 호스트 이름 `chiios`
 - 꺼진 Debian 을 다시 켜는 작업 스케줄러 작업 `chiiOS`
@@ -48,7 +49,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 | 하려는 것 | 방법 |
 |---|---|
 | 홈 화면 열기 | 바탕화면의 `chiiOS` (또는 `start.cmd`). 꺼져 있으면 켜고, 다 뜨면 앱 창으로 연다 |
-| 칸 옮기기 | `Alt+1~4`. 터미널 안에서 눌러도 셸로 가지 않고 칸이 옮겨진다 |
+| 칸 옮기기 | `Alt+1~4`. 터미널 안에서 눌러도 셸로 가지 않고 칸이 옮겨진다. 1번 칸 안에서 `Alt+1` 을 한 번 더 누르면 비서·터미널 탭이 바뀐다 |
+| 비서에게 말 걸기 | 1번 칸 [비서] 탭, 또는 상태줄 하치와레 말풍선을 누른다 |
 | 낮·밤 바꾸기 | 상태줄 시계 옆 단추. 자동(저녁 7시~아침 7시 밤) -> 낮 -> 밤 순서로 돈다 |
 | 터미널 복사·붙여넣기 | 글을 고르고 `Ctrl+C`(고른 글이 없으면 셸에 인터럽트), `Ctrl+V` |
 | 터미널로 들어가기 | `wsl -d Debian` |
@@ -61,6 +63,17 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 - WSL 은 Windows 재부팅이나 WSL 자동 업데이트(2026-11-10 3.0.1 -> 3.0.5 에서 겪음) 뒤에 Debian 을 다시 켜 주지 않는다. 그래서 `autostart.ps1` 이 작업 스케줄러에 `chiiOS` 작업을 걸어, 로그온할 때와 그 뒤 5분마다 Debian 을 깨운다. 관리자 권한은 필요 없다.
 - 작업은 로그온한 내 계정으로 돈다. WSL 배포판이 사용자별이라, Windows 에 로그온하기 전에는 켜지지 않는다. 재부팅 뒤에는 Parsec 등으로 들어가 로그온하면 된다.
 - 앱 창은 `msedge --app` 이다. Edge 는 창 크기를 기억하므로, 홈 화면이 처음 한 번만 창을 넉넉히 키우고 그 뒤로는 손대지 않는다. 바로가기는 `conhost --headless` 로 `start.cmd` 를 감싸 Debian 이 뜨는 동안 검은 창이 안 보인다.
+
+## 비서
+
+홈 화면 1번 칸 [비서] 탭. 홈 화면의 상태(봇, 할 일, 오늘 기록, 메모리·디스크)를 매번 같이 받아 보고 대답한다.
+
+- 할 줄 아는 것: 오늘 정리, 할 일 더하기·끝내기·지우기, 봇 상태 묻기·깨우기·재우기·다시 굽기·기록 읽기. 터미널 명령은 대신 치지 않는다.
+- 니나브처럼 깨우기 전 주의가 있는 봇은 비서가 바로 깨우지 않고 대화 안에 확인 단추를 띄운다. 단추는 띄운 지 10분 안의 마지막 것만 눌린다.
+- 머리: Anthropic API, 기본 모델 `claude-haiku-5-5`(effort `low`). 바꾸려면 `chii-home.service` 에 `CHII_ASSIST_MODEL`·`CHII_ASSIST_EFFORT` 환경 변수를 준다. SDK 는 `anthropic==2.3.0` 을 `/opt/chiios/venv` 에 고정해 깐다(`setup.sh`).
+- 열쇠: 처음 열면 [비서] 탭에 열쇠 칸이 뜬다. 넣으면 한 번 맞춰 본 뒤 Debian 안 `~/.config/chiios/anthropic-key`(600)에만 저장하고, 화면과 API 응답에는 다시 내보내지 않는다.
+- 같은 Anthropic 계정 안의 키는 잔액을 같이 쓴다. 비서가 잔액을 다 쓰면 니나브 답변도 멈추므로, Console 에서 월 한도를 건 작업 공간(`chiiOS`)을 만들고 그 안에서 만든 키를 넣는다.
+- 대화는 `~/.local/share/chiios/chat.jsonl` 에 쌓이고, 모델에게는 최근 20마디만 보낸다. [새 대화] 를 누르면 지우지 않고 `chat-archive/` 로 옮긴다.
 
 ## 상시 운영 PC 에서 챙길 것
 
@@ -92,6 +105,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 ## 주의
 
 - 브라우저 터미널과 홈 화면은 `127.0.0.1` 에만 열려 있다. 셸과 봇 단추를 통째로 내주는 것이라 다른 기기에서 열려면 Tailscale 같은 인증을 먼저 둔다.
+- 비서 열쇠·대화·확인 단추도 같은 규칙 아래 있다. 열쇠를 넣는 요청은 POST 라 `X-Chii` 머리글 없이는 안 받는다.
 - 다른 사이트가 몰래 요청하지 못하게, 홈 화면은 `localhost` 이름으로 온 요청만 받고 바꾸는 요청(POST)에는 `X-Chii: 1` 머리글을 요구한다. ttyd 는 `--check-origin` 으로 다른 출처의 웹소켓을 막는다.
 - 터미널 칸의 웹소켓(`/term/ws`)은 홈 화면 서버가 ttyd 로 바이트 그대로 잇는다. `Origin` 이 홈 화면(`http://localhost:7682`)이 아니면 403 이다. ttyd 쪽으로 넘길 때는 Origin·Host 를 ttyd 주소로 맞춰 `--check-origin` 도 그대로 통과한다.
 - 터미널 글꼴 D2Coding(OFL, 예약 이름 D2Coding)은 글리프를 건드리지 않고 woff2 로만 다시 싸서 `home/static/fonts/` 에 둔다. 보는 PC 에 글꼴이 없어도 한글 폭이 맞는다. xterm 5.5 는 `home/static/vendor/xterm/`(MIT).

@@ -56,7 +56,7 @@ fi
 
 step "기본 패키지"
 apt-get update -q
-apt-get install -y -q ca-certificates curl git htop python3
+apt-get install -y -q ca-certificates curl git htop python3 python3-venv
 
 step "Docker"
 # Debian 저장소의 docker.io 대신 Docker 공식 저장소를 쓴다. compose v2 플러그인이 같이 오고 업데이트가 빠르다.
@@ -173,6 +173,15 @@ step "홈 화면 (포트 $HOME_PORT)"
 install -d /opt/chiios
 rm -rf /opt/chiios/home /opt/chiios/bots
 cp -r "$CHII_DIR/home" "$CHII_DIR/bots" /opt/chiios/
+# 홈 화면은 표준 라이브러리만 쓰지만, 비서만 Anthropic 공식 SDK 를 쓴다. 시스템 python 에 pip 로 얹으면
+# Debian 패키지와 부딪히므로(PEP 668) 따로 venv 를 둔다. 판은 고정한다: 새 판이 나와도 다시 돌린 setup.sh 가 같은 걸 깐다.
+ANTHROPIC_SDK=2.3.0
+if [ ! -x /opt/chiios/venv/bin/python ]; then
+  python3 -m venv /opt/chiios/venv
+fi
+if [ "$(/opt/chiios/venv/bin/python -c 'import anthropic; print(anthropic.__version__)' 2>/dev/null)" != "$ANTHROPIC_SDK" ]; then
+  /opt/chiios/venv/bin/pip install -q --disable-pip-version-check "anthropic==$ANTHROPIC_SDK"
+fi
 cat > /etc/systemd/system/chii-home.service <<EOF
 [Unit]
 Description=chiiOS home screen
@@ -185,7 +194,7 @@ User=$CHII_USER
 WorkingDirectory=/home/$CHII_USER
 Environment=CHII_HOME_PORT=$HOME_PORT CHII_TERM_PORT=$TTYD_PORT
 # 터미널 칸처럼 127.0.0.1 에만 묶는다. 봇을 깨우고 재우는 단추가 있는 화면이다.
-ExecStart=/usr/bin/python3 /opt/chiios/home/server.py
+ExecStart=/opt/chiios/venv/bin/python /opt/chiios/home/server.py
 Restart=always
 
 [Install]

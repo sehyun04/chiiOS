@@ -278,12 +278,20 @@ document.addEventListener("keydown", (e) => {
   if (!e.altKey || !/^Digit[1-4]$/.test(e.code)) return;
   e.preventDefault();
   const n = e.code.slice(5);
-  setOn(n);
   const pane = panes.find((p) => p.dataset.n === n);
-  if (n === "1") window.chiiTerm?.focus();
+  const already = pane.contains(document.activeElement);
+  setOn(n);
+  if (n === "1") window.chiiChat?.enter(already);
   else if (n === "3") $("#todo-input").focus();
   else pane.querySelector("button")?.focus();
 });
+
+// 상태줄 하치와레 말풍선은 비서로 들어가는 문이다.
+$("#bubble").addEventListener("click", () => {
+  setOn(1);
+  window.chiiChat?.open();
+});
+window.chiiRefresh = refresh;
 
 // start.cmd 가 연 앱 창(주소창 없는 창)은 Edge 가 처음에 좁게 연다. 그러면 칸이 한 줄로 쌓인다.
 // 처음 한 번만 넉넉하게 키워 가운데 둔다. 그 뒤 크기는 Edge 가 창마다 기억하므로 사용자가 바꾼 대로 남는다.

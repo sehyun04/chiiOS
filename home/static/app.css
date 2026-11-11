@@ -169,7 +169,89 @@ button { font: inherit; color: inherit; }
 .pane .body { padding: 16px 18px; overflow: auto; min-height: 0; }
 
 /* 터미널. 칸 폭 계산(FitAddon)은 .xterm 의 안쪽 여백을 빼고 하므로 여백은 거기에 준다. */
-.term { background: var(--paper); }
+/* 1번 칸: [비서][터미널] 탭. 머리줄 오른쪽 것은 보고 있는 탭 것만 보인다. */
+.pane.main { background: var(--paper); }
+.pane.main[data-tab="chat"] .side-term, .pane.main[data-tab="term"] .side-chat { display: none; }
+.tabs { display: inline-flex; gap: 2px; margin-left: 2px; }
+.tab {
+  height: 26px; padding: 0 10px; border: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; color: var(--ink-3);
+  font-family: var(--ui); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.tab svg { width: 14px; height: 14px; }
+.tab:hover { color: var(--ink); }
+.tab.on { background: var(--paper-2); color: var(--ink); }
+.pane.on .tab.on { background: var(--sky-tint); color: var(--sky-ink); }
+.ghost {
+  height: 26px; padding: 0 9px; border: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; color: var(--ink-3); font-family: var(--ui); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.ghost svg { width: 13px; height: 13px; }
+.ghost:hover { background: var(--paper-2); color: var(--ink); }
+.tab:focus-visible, .ghost:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
+.view { flex: 1 1 auto; min-height: 0; }
+.view[hidden] { display: none; }
+
+/* 비서. 비서 말은 왼쪽 카드, 내 말은 오른쪽 하늘색. 글자가 나오는 대로 늘어난다. */
+.chat-view { display: flex; flex-direction: column; }
+.chat-log {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  list-style: none; margin: 0; padding: 22px 26px 12px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.chat-log::-webkit-scrollbar { width: 10px; }
+.chat-log::-webkit-scrollbar-thumb { background: var(--scroll); border: 3px solid transparent; border-radius: 5px; background-clip: padding-box; }
+.msg { display: flex; align-items: flex-start; gap: 10px; max-width: 760px; }
+.msg.me { align-self: flex-end; }
+.msg .av { width: 36px; height: 36px; flex: none; object-fit: contain; margin-top: -2px; }
+.msg .bubble { min-width: 0; padding: 10px 14px; border-radius: 14px; font-size: 14.5px; line-height: 1.65; }
+.msg.ai .bubble { background: var(--card); border: 1px solid var(--line); border-top-left-radius: 4px; }
+.msg.me .bubble { background: var(--sky-tint); border-top-right-radius: 4px; }
+.msg .txt { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.did { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.did .chip { background: var(--paper-2); }
+.ask { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--sun-tint); color: var(--sun-ink); font-size: 13px; line-height: 1.55; }
+.ask p { margin: 0 0 8px; }
+.ask .btns { gap: 8px; }
+.ask .glass { min-height: 38px; font-size: 13px; }
+.err { margin: 6px 0 0; color: var(--red-ink); font-size: 13px; }
+.dots { display: inline-flex; gap: 4px; padding: 6px 0; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); animation: blink 1.2s infinite ease-in-out; }
+.dots i:nth-child(2) { animation-delay: 0.15s; }
+.dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dots i { animation: none; opacity: 0.6; } }
+
+.hello { margin: auto; max-width: 520px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 24px 0; }
+.hello img { width: 92px; height: 92px; object-fit: contain; margin-bottom: 6px; }
+.hello b { font-family: var(--round); font-weight: 400; font-size: 22px; }
+.hello > .dim { font-size: 13.5px; line-height: 1.6; }
+.hello .small { font-size: 12px; margin-top: 6px; }
+.suggest { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
+.suggest .glass { min-height: 38px; font-size: 13px; }
+.key-form { display: flex; gap: 8px; width: min(440px, 100%); margin-top: 14px; }
+.key-form input {
+  flex: 1 1 auto; min-width: 0; height: 44px; padding: 0 14px;
+  border: 1px solid var(--line-glass); border-radius: 12px; background: var(--card); color: var(--ink);
+  font-family: var(--mono); font-size: 14px;
+}
+.key-form input:focus { outline: none; border-color: var(--sky); }
+
+.composer { flex: none; display: flex; align-items: flex-end; gap: 10px; padding: 12px 16px 14px; border-top: 1px solid var(--line); background: var(--card); }
+.composer textarea {
+  flex: 1 1 auto; min-width: 0; min-height: 44px; max-height: 160px; resize: none;
+  padding: 11px 14px; border: 1px solid var(--line-glass); border-radius: 12px;
+  background: var(--paper); color: var(--ink); font-family: var(--ui); font-size: 14.5px; line-height: 1.5;
+  overflow-y: hidden;
+}
+.composer textarea::placeholder { color: var(--ink-3); }
+.composer textarea:focus { outline: none; border-color: var(--sky); }
+.composer textarea:disabled { opacity: 0.6; }
+.composer .send { width: 44px; padding: 0; justify-content: center; flex: none; }
+.composer .send svg { width: 18px; height: 18px; }
+
 .term-box { position: relative; flex: 1 1 auto; min-height: 0; }
 #term { position: absolute; inset: 0; }
 #term .xterm { height: 100%; padding: 12px 6px 10px 16px; }
@@ -297,7 +379,7 @@ li.done .todo-check svg { display: block; }
 .seg.blush { background: var(--blush-tint); color: var(--blush-ink); }
 .seg.card { background: var(--card); }
 .hint { padding: 0 10px; font-size: 12px; color: var(--ink-3); }
-.seg.glass.bubble { min-height: 34px; padding: 0 12px 0 4px; font-family: var(--round); font-weight: 400; cursor: default; }
+.seg.glass.bubble { min-height: 34px; padding: 0 12px 0 4px; font-family: var(--round); font-weight: 400; font-size: 13px; }
 .bubble img { width: 28px; height: 28px; object-fit: contain; }
 .seg.glass.mode { min-height: 34px; padding: 0 12px 0 10px; gap: 6px; font-size: 13px; }
 .mode #mode-icon { display: inline-flex; }
@@ -325,7 +407,7 @@ dialog .btns:empty { display: none; }
 
 @media (max-width: 960px) {
   .desk { height: auto; min-height: 100vh; grid-template-columns: minmax(0, 1fr); }
-  .term { height: 60vh; }
+  .pane.main { height: 70vh; }
   .term-box { min-height: 300px; }
   .hint { display: none; }
 }
