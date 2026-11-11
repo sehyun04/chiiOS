@@ -1,0 +1,9 @@
+{
+  "name": "chiiOS",
+  "short_name": "chiiOS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4eada",
+  "theme_color": "#f4eada",
+  "icons": [{ "src": "faces/hachiware-work.png", "sizes": "240x240", "type": "image/png" }]
+}

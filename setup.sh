@@ -113,7 +113,8 @@ WorkingDirectory=/home/$CHII_USER
 # 그리기는 DOM 으로 둔다. 기본값 WebGL 은 화면 배율이 어긋나면(시험 브라우저에서 1.25 와 1) 캔버스가
 # 아래로 밀려 위쪽 다섯 줄쯤이 비었다. DOM 은 그런 일이 없고 이 정도 출력엔 충분히 빠르다.
 # --check-origin: 다른 사이트의 페이지가 이 터미널 웹소켓에 몰래 붙지 못하게 한다. 홈 화면의 터미널 칸은
-# ttyd 페이지를 그대로 띄우는 것이라 출처가 같아 문제없다.
+# 홈 화면 서버(/term/ws)가 출처를 먼저 보고, Origin·Host 를 이 ttyd 주소로 맞춰 넘기므로 그대로 통과한다.
+# 아래 -t 색·글꼴은 7681 을 브라우저로 바로 열 때만 쓰인다. 홈 화면 칸의 색은 home/static/term.js 가 정한다.
 ExecStart=/usr/local/bin/ttyd --interface 127.0.0.1 --port $TTYD_PORT --writable --check-origin -t titleFixed=chiiOS -t disableResizeOverlay=true -t rendererType=dom -t fontSize=15 -t lineHeight=1.25 -t cursorBlink=true -t 'fontFamily=$TTYD_FONT' -t 'theme=$TTYD_THEME' bash -l
 Restart=always
 

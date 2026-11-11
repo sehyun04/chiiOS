@@ -6,12 +6,13 @@
 
 - Debian 13 (trixie), systemd
 - Docker Engine + Compose 플러그인 (Docker 공식 저장소)
-- 홈 화면: `http://localhost:7682` (`chii-home.service`, `home/`). 터미널·봇·오늘 할 일·오늘 기록 네 칸과 아래 상태줄
-- 브라우저 터미널: ttyd 1.7.7, `http://localhost:7681` (`chii-term.service`). 홈 화면 1번 칸에도 뜬다
+- 홈 화면: `http://localhost:7682` (`chii-home.service`, `home/`). 터미널·봇·오늘 할 일·오늘 기록 네 칸과 아래 상태줄, 낮·밤 두 벌
+- 브라우저 터미널: ttyd 1.7.7, `http://localhost:7681` (`chii-term.service`). 홈 화면 1번 칸은 이 ttyd 에 웹소켓으로 붙어 xterm 으로 직접 그린다
+- 바탕화면·시작 메뉴의 `chiiOS` 바로가기: 홈 화면을 주소창 없는 Edge 앱 창으로 연다
 - 사용자 `sehyun`, 호스트 이름 `chiios`
 - 꺼진 Debian 을 다시 켜는 작업 스케줄러 작업 `chiiOS`
 
-겉모습은 치이스페(`kasaspace`)의 색·글꼴·얼굴 그림을 그대로 쓴다. 봇은 봇 이름 그대로 두고, 캐릭터는 할 일 칸과 상태줄 말풍선의 꾸밈으로만 쓴다.
+겉모습은 치이스페(`kasaspace`)의 색·글꼴·얼굴 그림을 그대로 쓴다. 봇은 봇 이름 그대로 두고, 캐릭터는 할 일 칸과 상태줄 말풍선의 꾸밈으로만 쓴다. 밤 색은 치이스페에 없어 같은 색조를 어두운 코코아 바탕으로 옮겨 만들었다(보라 없음).
 
 ## 새 PC 에 설치
 
@@ -37,7 +38,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 3. Debian 이 없으면 `wsl --install -d Debian --no-launch` 로 깐다.
 4. Debian 안에서 root 로 `setup.sh` 를 돌린다. `/etc/wsl.conf` 가 바뀌었으면 Debian 을 껐다 켜서 기본 사용자·호스트 이름을 적용한다.
 5. `autostart.ps1` 로 자동 켜기 작업을 건다.
-6. systemd, 사용자, docker·chii-term, 브라우저 터미널 응답을 확인한다.
+6. `shortcut.ps1` 로 바탕화면과 시작 메뉴에 `chiiOS` 바로가기를 만든다.
+7. systemd, 사용자, docker·chii-term·chii-home, 브라우저 터미널과 홈 화면 응답을 확인한다.
 
 여러 번 돌려도 결과가 같다. 설정을 바꾸면 해당 파일을 고치고 `install.ps1` 을 다시 돌린다.
 
@@ -45,15 +47,20 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 | 하려는 것 | 방법 |
 |---|---|
-| 홈 화면 열기 | `start.cmd` 더블클릭 (꺼져 있으면 켜고 연다) |
-| 칸 옮기기 | 홈 화면에서 `Alt+1~4` (터미널 안에서는 키가 셸로 가므로 칸을 한 번 눌러 밖으로 나온다) |
+| 홈 화면 열기 | 바탕화면의 `chiiOS` (또는 `start.cmd`). 꺼져 있으면 켜고, 다 뜨면 앱 창으로 연다 |
+| 칸 옮기기 | `Alt+1~4`. 터미널 안에서 눌러도 셸로 가지 않고 칸이 옮겨진다 |
+| 낮·밤 바꾸기 | 상태줄 시계 옆 단추. 자동(저녁 7시~아침 7시 밤) -> 낮 -> 밤 순서로 돈다 |
+| 터미널 복사·붙여넣기 | 글을 고르고 `Ctrl+C`(고른 글이 없으면 셸에 인터럽트), `Ctrl+V` |
 | 터미널로 들어가기 | `wsl -d Debian` |
 | Debian 안 설정만 다시 적용 | 이 폴더에서 `wsl -d Debian -u root -- bash ./setup.sh` |
 | 끄기 | `wsl --terminate Debian` (WSL 전체는 `wsl --shutdown`). 자동 켜기가 걸려 있으면 5분 안에 다시 켜진다 |
 | 자동 켜기 걸기·떼기 | `powershell -ExecutionPolicy Bypass -File autostart.ps1` (떼기는 뒤에 `-Remove`) |
+| 바로가기 만들기·지우기 | `powershell -ExecutionPolicy Bypass -File shortcut.ps1` (지우기는 뒤에 `-Remove`) |
+| 홈 화면 고친 것 반영 | 이 폴더에서 `git pull` 뒤 `install.ps1` (또는 Debian 설정만 `wsl -d Debian -u root -- bash ./setup.sh`). 돌아가는 화면은 `/opt/chiios` 의 사본이다 |
 
 - WSL 은 Windows 재부팅이나 WSL 자동 업데이트(2026-11-10 3.0.1 -> 3.0.5 에서 겪음) 뒤에 Debian 을 다시 켜 주지 않는다. 그래서 `autostart.ps1` 이 작업 스케줄러에 `chiiOS` 작업을 걸어, 로그온할 때와 그 뒤 5분마다 Debian 을 깨운다. 관리자 권한은 필요 없다.
 - 작업은 로그온한 내 계정으로 돈다. WSL 배포판이 사용자별이라, Windows 에 로그온하기 전에는 켜지지 않는다. 재부팅 뒤에는 Parsec 등으로 들어가 로그온하면 된다.
+- 앱 창은 `msedge --app` 이다. Edge 는 창 크기를 기억하므로, 홈 화면이 처음 한 번만 창을 넉넉히 키우고 그 뒤로는 손대지 않는다. 바로가기는 `conhost --headless` 로 `start.cmd` 를 감싸 Debian 이 뜨는 동안 검은 창이 안 보인다.
 
 ## 상시 운영 PC 에서 챙길 것
 
@@ -86,6 +93,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 - 브라우저 터미널과 홈 화면은 `127.0.0.1` 에만 열려 있다. 셸과 봇 단추를 통째로 내주는 것이라 다른 기기에서 열려면 Tailscale 같은 인증을 먼저 둔다.
 - 다른 사이트가 몰래 요청하지 못하게, 홈 화면은 `localhost` 이름으로 온 요청만 받고 바꾸는 요청(POST)에는 `X-Chii: 1` 머리글을 요구한다. ttyd 는 `--check-origin` 으로 다른 출처의 웹소켓을 막는다.
+- 터미널 칸의 웹소켓(`/term/ws`)은 홈 화면 서버가 ttyd 로 바이트 그대로 잇는다. `Origin` 이 홈 화면(`http://localhost:7682`)이 아니면 403 이다. ttyd 쪽으로 넘길 때는 Origin·Host 를 ttyd 주소로 맞춰 `--check-origin` 도 그대로 통과한다.
+- 터미널 글꼴 D2Coding(OFL, 예약 이름 D2Coding)은 글리프를 건드리지 않고 woff2 로만 다시 싸서 `home/static/fonts/` 에 둔다. 보는 PC 에 글꼴이 없어도 한글 폭이 맞는다. xterm 5.5 는 `home/static/vendor/xterm/`(MIT).
 - 홈 화면이 7680 이 아니라 7682 인 이유: 7680 은 Windows 배달 최적화(DoSvc)가 쥐고 있어 Windows 쪽 `localhost:7680` 이 Debian 까지 오지 않는다.
 - 할 일과 홈 화면이 받아 적은 기록은 Debian 안 `~/.local/share/chiios/` 에 있다. 재부팅 기록은 systemd 저널에서 읽는다.
 - WSL 에서는 sudo 비밀번호를 없앴다. Windows 계정이면 어차피 `wsl -u root` 로 root 가 되기 때문이다. WSL 이 아닌 순정 Debian 에 깔면 `setup.sh` 가 이 설정을 건너뛴다.

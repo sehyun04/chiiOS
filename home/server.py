@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# chiiOS 홈 화면. 봇·할 일·기록을 보여 주고, 터미널 칸에는 ttyd 를 띄운다.
+# chiiOS 홈 화면. 봇·할 일·기록을 보여 주고, 터미널 칸은 ttyd 웹소켓을 이어 받아 직접 그린다.
 # 표준 라이브러리만 쓴다. 봇 돌리는 기계에 pip 패키지를 들이면 setup.sh 가 챙길 것이 늘고 업데이트 때 깨질 곳도 는다.
 import json
 import os
@@ -32,10 +32,32 @@ TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
+    ".webmanifest": "application/manifest+json; charset=utf-8",
     ".png": "image/png",
     ".ttf": "font/ttf",
+    ".woff2": "font/woff2",
     ".txt": "text/plain; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
 }
+# 글꼴과 xterm 은 3MB 가 넘고 판이 고정이라 매번 새로 받을 까닭이 없다. 나머지는 고치면 바로 보이게 캐시하지 않는다.
+CACHED = ("fonts/", "vendor/")
+
+
+def pipe(src, dst):
+    try:
+        while True:
+            data = src.recv(65536)
+            if not data:
+                break
+            dst.sendall(data)
+    except OSError:
+        pass
+    # 한쪽이 끊기면 양쪽을 다 닫아야 반대 방향 recv 도 깨어나 스레드가 끝난다.
+    for s in (src, dst):
+        try:
+            s.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
 
 
 def sh(args, timeout=10):
@@ -317,6 +339,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_ok():
             return self.send_error(403)
         u = urlparse(self.path)
+        if u.path == "/term/ws":
+            return self.term_ws()
         if u.path == "/api/state":
             return self.send_json({
                 "sys": system_info(),
@@ -347,10 +371,44 @@ class Handler(BaseHTTPRequestHandler):
         data = f.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", TYPES.get(f.suffix, "application/octet-stream"))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "max-age=604800" if rel.startswith(CACHED) else "no-store")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def term_ws(self):
+        # 터미널 칸의 웹소켓을 ttyd 로 바이트 그대로 잇는다. 홈 화면과 같은 출처로 붙어야 칸 안의 글꼴·색·단축키를
+        # 홈 화면이 쥘 수 있다(ttyd 페이지를 iframe 으로 넣으면 출처가 달라 손댈 수 없었다).
+        # 셸을 내주는 길이라 출처는 여기서 홈 화면 것만 받는다. 다른 사이트의 페이지는 Origin 을 꾸밀 수 없다.
+        # ttyd 의 --check-origin 은 Origin 과 Host 가 같은지를 보므로, 넘길 때는 둘 다 ttyd 자기 주소로 맞춘다.
+        origin = self.headers.get("Origin", "")
+        if origin not in (f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}") \
+                or (self.headers.get("Upgrade") or "").lower() != "websocket":
+            return self.send_error(403)
+        try:
+            up = socket.create_connection(("127.0.0.1", TERM_PORT), timeout=5)
+        except OSError:
+            return self.send_error(502)
+        head = [
+            "GET /ws HTTP/1.1",
+            f"Host: localhost:{TERM_PORT}",
+            f"Origin: http://localhost:{TERM_PORT}",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            f"Sec-WebSocket-Key: {self.headers.get('Sec-WebSocket-Key', '')}",
+            f"Sec-WebSocket-Version: {self.headers.get('Sec-WebSocket-Version', '13')}",
+            "Sec-WebSocket-Protocol: tty",
+        ]
+        up.sendall(("\r\n".join(head) + "\r\n\r\n").encode("ascii"))
+        up.settimeout(None)
+        self.connection.settimeout(None)
+        self.close_connection = True
+        # ttyd 의 101 응답부터 그대로 돌려준다. 키가 같으니 브라우저가 보는 Accept 값도 맞는다.
+        back = threading.Thread(target=pipe, args=(up, self.connection), daemon=True)
+        back.start()
+        pipe(self.connection, up)
+        back.join()
+        up.close()
 
     def do_POST(self):
         # 커스텀 머리글을 요구하면 다른 사이트에서 몰래 보내는 요청은 브라우저가 사전 확인에서 막는다.

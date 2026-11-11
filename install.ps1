@@ -1,4 +1,4 @@
-﻿# chiiOS 를 이 Windows 에 깐다: .wslconfig, Debian, setup.sh, 자동 켜기, 확인까지.
+﻿# chiiOS 를 이 Windows 에 깐다: .wslconfig, Debian, setup.sh, 자동 켜기, 바로가기, 확인까지.
 # 노트북에서 손으로 밟았던 순서를 그대로 옮겼다. 여러 번 돌려도 결과가 같다.
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1
@@ -13,6 +13,7 @@ $env:WSL_UTF8 = '1'
 
 $distro = 'Debian'
 $ttydPort = 7681  # setup.sh 의 TTYD_PORT 기본값과 같아야 한다
+$homePort = 7682  # setup.sh 의 HOME_PORT 기본값과 같아야 한다
 
 function Step($msg) { Write-Host "`n== $msg" }
 function Fail($msg) { Write-Host "실패: $msg" -ForegroundColor Red; exit 1 }
@@ -81,21 +82,29 @@ if ("$confBefore" -ne "$confAfter") {
 Step '자동 켜기'
 & (Join-Path $PSScriptRoot 'autostart.ps1')
 
+Step '바로가기'
+& (Join-Path $PSScriptRoot 'shortcut.ps1')
+
 Step '확인'
 $state = & wsl.exe -d $distro --exec systemctl is-system-running --wait
 $who = "$(& wsl.exe -d $distro --exec whoami)@$(& wsl.exe -d $distro --exec hostname)"
-$services = (& wsl.exe -d $distro --exec systemctl is-active docker chii-term) -join ' '
-$http = 'down'
-for ($i = 0; $i -lt 10 -and $http -ne 200; $i++) {
-    try { $http = (Invoke-WebRequest -UseBasicParsing "http://localhost:$ttydPort" -TimeoutSec 3).StatusCode }
-    catch { Start-Sleep -Seconds 1 }
+$services = (& wsl.exe -d $distro --exec systemctl is-active docker chii-term chii-home) -join ' '
+function Probe($port) {
+    for ($i = 0; $i -lt 10; $i++) {
+        try { return (Invoke-WebRequest -UseBasicParsing "http://localhost:$port" -TimeoutSec 3).StatusCode }
+        catch { Start-Sleep -Seconds 1 }
+    }
+    return 'down'
 }
+$http = Probe $ttydPort
+$home200 = Probe $homePort
 Write-Host "systemd: $state"
 Write-Host "사용자: $who"
-Write-Host "docker, chii-term: $services"
+Write-Host "docker, chii-term, chii-home: $services"
 Write-Host "브라우저 터미널 http://localhost:${ttydPort}: $http"
-if ($state -ne 'running' -or $services -ne 'active active' -or $http -ne 200) {
+Write-Host "홈 화면 http://localhost:${homePort}: $home200"
+if ($state -ne 'running' -or $services -ne 'active active active' -or $http -ne 200 -or $home200 -ne 200) {
     & wsl.exe -d $distro --exec systemctl --failed --no-legend
     Fail '확인 단계에서 걸렸다. 위 출력을 본다.'
 }
-Write-Host "`n끝. 브라우저 터미널: http://localhost:$ttydPort"
+Write-Host "`n끝. 바탕화면의 chiiOS 를 누르면 홈 화면이 열린다."

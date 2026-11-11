@@ -1,10 +1,13 @@
-/* chiiOS 홈. 색·글꼴은 치이스페(kasaspace/ui/theme.css)에서 그대로 왔다.
+/* chiiOS 홈. 색·글꼴은 치이스페(kasaspace/ui/theme.css)에서 그대로 왔다. 밤 색은 치이스페에 없어 같은 색조를 어두운 코코아 위로 옮겨 만들었다.
  * 굵은 테두리와 어긋난 그림자는 쓰지 않는다(사용자가 걷어 냈다). 버튼은 1px 선과 위쪽 하이라이트로 낸 유리 결.
  * 칸과 칸은 선이 아니라 틈과 바탕색 차이로 가른다. */
 
 @font-face { font-family: "Quicksand"; src: url("fonts/Quicksand.ttf") format("truetype"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "Quicksand"; src: url("fonts/QuicksandSB.ttf") format("truetype"); font-weight: 600 700; font-display: swap; }
 @font-face { font-family: "Jua"; src: url("fonts/Jua.ttf") format("truetype"); font-display: swap; }
+/* D2Coding 원본을 손대지 않고 woff2 로만 다시 쌌다. 이름(D2Coding)은 OFL 예약 이름이라 CSS 에서는 따로 부른다. */
+@font-face { font-family: "chii-mono"; src: url("fonts/D2Coding.woff2") format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "chii-mono"; src: url("fonts/D2Coding-Bold.woff2") format("woff2"); font-weight: 700; font-display: block; }
 
 :root {
   --paper: #fbf5ea;
@@ -25,17 +28,76 @@
   --green: #4f7b4d;
   --red: #c34741;
   --cocoa: #96663d;
+  --dot: #e2d1b5;
+  --green-tint: #e5f0e3;
+  --green-ink: #3d703b;
+  --red-tint: #f7dedd;
+  --red-ink: #9e3530;
+  --sun-track: #f1dfa6;
+  --check-ink: #fff;
+  --glass-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(251, 245, 234, 0.7) 100%);
+  --glass-hi: inset 0 1px 0 #fff;
+  --glass-hover: #d3bf9d;
+  --pri-line: rgba(47, 106, 143, 0.3);
+  --pri-hover: rgba(47, 106, 143, 0.5);
+  --pri-bg: linear-gradient(180deg, rgba(225, 240, 249, 0.95) 0%, rgba(196, 225, 242, 0.75) 100%);
+  --pri-ink: #275a7a;
+  --pri-hi: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(47, 106, 143, 0.08);
+  --scroll: #dccbae;
+  --lift: 0 24px 60px rgba(91, 68, 51, 0.18);
+  --dim-bg: rgba(91, 68, 51, 0.18);
   --ui: "Quicksand", "Jua", "Malgun Gothic", system-ui, sans-serif;
   --round: "Jua", "Quicksand", "Malgun Gothic", sans-serif;
-  --mono: "D2KodingLigature Nerd Font", "D2Coding", "Cascadia Mono", Consolas, monospace;
+  --mono: "chii-mono", "D2Coding", "Cascadia Mono", Consolas, monospace;
   color-scheme: light;
+}
+
+/* 밤. 바탕은 불 끈 방의 코코아, 하늘·햇살·볼터치는 색조를 두고 밝기만 올렸다. 보라는 쓰지 않는다. */
+:root[data-theme="night"] {
+  --paper: #231c17;
+  --paper-2: #1b1612;
+  --card: #2a221c;
+  --ink: #f1e4d1;
+  --ink-2: #d5c3ab;
+  --ink-3: #b39d85;
+  --line: #43372d;
+  --line-glass: #4f4236;
+  --sky: #7cc0e6;
+  --sky-ink: #a8d8f3;
+  --sky-tint: #203646;
+  --sun-ink: #ecd38f;
+  --sun-tint: #3b3121;
+  --blush-ink: #f2b5b9;
+  --blush-tint: #44292c;
+  --green: #9fcf9a;
+  --red: #f08a84;
+  --cocoa: #d9a978;
+  --dot: #2f2620;
+  --green-tint: #26372a;
+  --green-ink: #a9d6a4;
+  --red-tint: #46272a;
+  --red-ink: #f5a19c;
+  --sun-track: #5b4b2a;
+  --check-ink: #1d2a33;
+  --glass-bg: linear-gradient(180deg, rgba(255, 240, 220, 0.09) 0%, rgba(255, 240, 220, 0.035) 100%);
+  --glass-hi: inset 0 1px 0 rgba(255, 245, 230, 0.1);
+  --glass-hover: #6a594a;
+  --pri-line: rgba(124, 192, 230, 0.35);
+  --pri-hover: rgba(124, 192, 230, 0.6);
+  --pri-bg: linear-gradient(180deg, rgba(124, 192, 230, 0.26) 0%, rgba(124, 192, 230, 0.14) 100%);
+  --pri-ink: #c3e6fa;
+  --pri-hi: inset 0 1px 0 rgba(200, 235, 255, 0.16);
+  --scroll: #4d4034;
+  --lift: 0 24px 60px rgba(0, 0, 0, 0.5);
+  --dim-bg: rgba(10, 6, 4, 0.5);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
   background-color: var(--paper-2);
-  background-image: radial-gradient(#e2d1b5 1.2px, transparent 1.3px);
+  background-image: radial-gradient(var(--dot) 1.2px, transparent 1.3px);
   background-size: 20px 20px;
   color: var(--ink);
   font-family: var(--ui);
@@ -106,8 +168,30 @@ button { font: inherit; color: inherit; }
 .pane.on .n { background: var(--sky-tint); color: var(--sky-ink); }
 .pane .body { padding: 16px 18px; overflow: auto; min-height: 0; }
 
+/* 터미널. 칸 폭 계산(FitAddon)은 .xterm 의 안쪽 여백을 빼고 하므로 여백은 거기에 준다. */
 .term { background: var(--paper); }
-.term iframe { flex: 1 1 auto; width: 100%; border: 0; background: var(--paper); }
+.term-box { position: relative; flex: 1 1 auto; min-height: 0; }
+#term { position: absolute; inset: 0; }
+#term .xterm { height: 100%; padding: 12px 6px 10px 16px; }
+/* 표준 scrollbar-color 를 쓰면 Chromium 이 위아래 화살표 단추까지 그려 칸 모서리에 점이 남는다. 화살표 없는 둥근 손잡이만 남긴다. */
+#term .xterm-viewport::-webkit-scrollbar { width: 10px; }
+#term .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+#term .xterm-viewport::-webkit-scrollbar-thumb { background: var(--scroll); border: 3px solid transparent; border-radius: 5px; background-clip: padding-box; }
+@supports not selector(::-webkit-scrollbar) {
+  #term .xterm-viewport { scrollbar-width: thin; scrollbar-color: var(--scroll) transparent; }
+}
+.term-cover {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background: var(--paper);
+  text-align: center;
+}
+/* display:flex 가 hidden 속성의 기본 display:none 을 이기므로 따로 꺼 준다. */
+.term-cover[hidden] { display: none; }
+.term-cover img { width: 72px; height: 72px; object-fit: contain; }
+.term-cover b { font-family: var(--round); font-weight: 400; font-size: 20px; }
+.term-cover span { font-size: 13px; }
+.term-cover .glass { margin-top: 8px; }
 
 /* 봇 */
 .bot { display: flex; flex-direction: column; gap: 12px; }
@@ -118,9 +202,9 @@ button { font: inherit; color: inherit; }
 .pill i { width: 8px; height: 8px; border-radius: 50%; }
 .pill.rest { background: var(--paper-2); color: var(--ink-2); }
 .pill.rest i { border: 2px solid var(--ink-3); }
-.pill.work { background: #e5f0e3; color: #3d703b; }
+.pill.work { background: var(--green-tint); color: var(--green-ink); }
 .pill.work i { background: var(--green); }
-.pill.down { background: #f7dedd; color: #9e3530; }
+.pill.down { background: var(--red-tint); color: var(--red-ink); }
 .pill.down i { background: var(--red); }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .stats div { display: flex; flex-direction: column; gap: 3px; padding: 9px 12px; border-radius: 10px; background: var(--paper); min-width: 0; }
@@ -143,25 +227,25 @@ button { font: inherit; color: inherit; }
   padding: 0 16px;
   border-radius: 12px;
   border: 1px solid var(--line-glass);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(251, 245, 234, 0.7) 100%);
+  background: var(--glass-bg);
   color: var(--ink);
   font-family: var(--ui);
   font-weight: 700;
   font-size: 14px;
-  box-shadow: inset 0 1px 0 #fff;
+  box-shadow: var(--glass-hi);
   backdrop-filter: blur(12px) saturate(1.4);
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
-.glass:hover { border-color: #d3bf9d; }
+.glass:hover { border-color: var(--glass-hover); }
 .glass.primary {
   padding: 0 18px;
-  border-color: rgba(47, 106, 143, 0.3);
-  background: linear-gradient(180deg, rgba(225, 240, 249, 0.95) 0%, rgba(196, 225, 242, 0.75) 100%);
-  color: #275a7a;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(47, 106, 143, 0.08);
+  border-color: var(--pri-line);
+  background: var(--pri-bg);
+  color: var(--pri-ink);
+  box-shadow: var(--pri-hi);
 }
-.glass.primary:hover { border-color: rgba(47, 106, 143, 0.5); }
+.glass.primary:hover { border-color: var(--pri-hover); }
 .glass:disabled { opacity: 0.55; cursor: default; }
 .glass:focus-visible, .todo-check:focus-visible, .x:focus-visible, .todo-del:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
 .x:focus:not(:focus-visible) { outline: none; }
@@ -180,7 +264,7 @@ button { font: inherit; color: inherit; }
   border: 2px solid var(--sky); border-radius: 5px; background: transparent; cursor: pointer;
 }
 li.done .todo-check { background: var(--sky); border-color: var(--sky); }
-.todo-check svg { width: 11px; height: 11px; stroke: #fff; stroke-width: 4; display: none; }
+.todo-check svg { width: 11px; height: 11px; stroke: var(--check-ink); stroke-width: 4; display: none; }
 li.done .todo-check svg { display: block; }
 .todo-del { margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--ink-3); cursor: pointer; opacity: 0; }
 #todos li:hover .todo-del, .todo-del:focus-visible { opacity: 1; }
@@ -208,13 +292,15 @@ li.done .todo-check svg { display: block; }
 .seg.sky { background: var(--sky-tint); color: var(--sky-ink); font-weight: 600; }
 .seg.sky .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--sky-ink); }
 .seg.sun { background: var(--sun-tint); color: var(--sun-ink); }
-.meter { width: 44px; height: 6px; border-radius: 3px; background: #f1dfa6; overflow: hidden; }
+.meter { width: 44px; height: 6px; border-radius: 3px; background: var(--sun-track); overflow: hidden; }
 .meter span { display: block; height: 100%; min-width: 4px; border-radius: 3px; background: var(--sun-ink); }
 .seg.blush { background: var(--blush-tint); color: var(--blush-ink); }
 .seg.card { background: var(--card); }
 .hint { padding: 0 10px; font-size: 12px; color: var(--ink-3); }
 .seg.glass.bubble { min-height: 34px; padding: 0 12px 0 4px; font-family: var(--round); font-weight: 400; cursor: default; }
 .bubble img { width: 28px; height: 28px; object-fit: contain; }
+.seg.glass.mode { min-height: 34px; padding: 0 12px 0 10px; gap: 6px; font-size: 13px; }
+.mode #mode-icon { display: inline-flex; }
 
 /* 대화 상자 */
 dialog {
@@ -225,9 +311,9 @@ dialog {
   border-radius: 16px;
   background: var(--card);
   color: var(--ink);
-  box-shadow: 0 24px 60px rgba(91, 68, 51, 0.18);
+  box-shadow: var(--lift);
 }
-dialog::backdrop { background: rgba(91, 68, 51, 0.18); backdrop-filter: blur(3px); }
+dialog::backdrop { background: var(--dim-bg); backdrop-filter: blur(3px); }
 .dlg-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--line); font-family: var(--round); font-size: 18px; }
 .dlg-head b { font-weight: 400; flex: 1 1 auto; }
 .x { width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 10px; background: none; color: var(--ink-3); cursor: pointer; }
@@ -240,5 +326,9 @@ dialog .btns:empty { display: none; }
 @media (max-width: 960px) {
   .desk { height: auto; min-height: 100vh; grid-template-columns: minmax(0, 1fr); }
   .term { height: 60vh; }
+  .term-box { min-height: 300px; }
   .hint { display: none; }
 }
+
+/* 낮밤이 바뀔 때 화면 전체를 한 번에 겹쳐 넘긴다(app.js 의 startViewTransition). */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.45s; }

@@ -9,6 +9,8 @@ const ICON = {
   warn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>',
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>',
   x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>',
+  sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>',
+  sunMoon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a2.83 2.83 0 0 0 4 4 4 4 0 1 1-4-4"></path><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.9 4.9 1.4 1.4"></path><path d="m17.7 17.7 1.4 1.4"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.3 17.7-1.4 1.4"></path><path d="m19.1 4.9-1.4 1.4"></path></svg>',
 };
 
 let state = null;
@@ -136,8 +138,50 @@ function renderBar(s) {
   $("#say").textContent = say;
 }
 
+// 낮·밤. 자동이면 저녁 7시부터 아침 7시까지 밤이다. Windows 다크 모드가 아니라 시각을 따르는 건,
+// 계속 켜 두는 화면이라 방이 어두워지는 때에 맞추는 게 눈에 편해서다.
+const MODES = {
+  auto: { icon: ICON.sunMoon, label: "자동", tip: "자동: 저녁 7시부터 아침 7시까지 밤. 누르면 낮으로" },
+  day: { icon: ICON.sun, label: "낮", tip: "늘 낮. 누르면 밤으로" },
+  night: { icon: ICON.moon, label: "밤", tip: "늘 밤. 누르면 자동으로" },
+};
+const NEXT = { auto: "day", day: "night", night: "auto" };
+let mode = "auto";
+try { mode = localStorage.getItem("chii-theme") || "auto"; } catch {}
+if (!MODES[mode]) mode = "auto";
+
+function theme() {
+  const h = new Date().getHours();
+  const night = mode === "night" || (mode === "auto" && (h >= 19 || h < 7));
+  const want = night ? "night" : "day";
+  const btn = $("#mode");
+  btn.title = MODES[mode].tip;
+  btn.setAttribute("aria-label", `화면 색 ${MODES[mode].label}`);
+  $("#mode-icon").innerHTML = MODES[mode].icon;
+  $("#mode-label").textContent = MODES[mode].label;
+  const root = document.documentElement;
+  if (root.dataset.theme === want && window.chiiThemeApplied) return;
+  window.chiiThemeApplied = true;
+  const apply = () => {
+    root.dataset.theme = want;
+    document.querySelector('meta[name="theme-color"]').content = night ? "#1b1612" : "#f4eada";
+    window.chiiTerm?.setTheme(night);
+  };
+  // 낮밤이 바뀌는 순간은 화면 전체가 갈리므로 한 번에 스르륵 넘긴다. 처음 그릴 때와 움직임 줄이기 설정에서는 바로 바꾼다.
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (document.startViewTransition && !calm && root.dataset.theme !== want) document.startViewTransition(apply);
+  else apply();
+}
+
+$("#mode").addEventListener("click", () => {
+  mode = NEXT[mode];
+  try { localStorage.setItem("chii-theme", mode); } catch {}
+  theme();
+});
+
 function tick() {
   const d = new Date();
+  theme();
   $("#clock").textContent = `${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${DAYS[d.getDay()]} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   $("#today").textContent = `${d.getMonth() + 1}월 ${d.getDate()}일 ${DAYS[d.getDay()]}요일`;
 }
@@ -150,8 +194,6 @@ async function refresh() {
     $("#say").textContent = "대장, 집이랑 연락이 끊겼어";
     return;
   }
-  const frame = $("#ttyd");
-  if (!frame.src) frame.src = `http://${location.hostname}:${state.termPort}/`;
   renderBots(state.bots, state.services);
   renderTodos(state.todos);
   renderEvents(state.events);
@@ -224,22 +266,37 @@ $("#todo-form").addEventListener("submit", async (e) => {
   refresh();
 });
 
-// 보고 있는 칸 표시. 터미널 안을 누르면 포커스가 iframe 으로 넘어가 창이 blur 된다.
+// 보고 있는 칸 표시. 누르거나 키보드로 들어온 칸에 불을 켠다.
 const panes = [...document.querySelectorAll(".pane")];
 function setOn(n) { panes.forEach((p) => p.classList.toggle("on", p.dataset.n === String(n))); }
-panes.forEach((p) => p.addEventListener("mousedown", () => setOn(p.dataset.n)));
-window.addEventListener("blur", () => setTimeout(() => { if (document.activeElement === $("#ttyd")) setOn(1); }, 0));
-// Alt+숫자로 칸 옮기기. 터미널 안에 있을 땐 키가 셸로 가므로, 터미널 밖에서만 먹는다.
+panes.forEach((p) => {
+  p.addEventListener("mousedown", () => setOn(p.dataset.n));
+  p.addEventListener("focusin", () => setOn(p.dataset.n));
+});
+// Alt+숫자로 칸 옮기기. 터미널 안에서 누른 것도 term.js 가 셸로 안 보내고 여기로 흘려 준다.
 document.addEventListener("keydown", (e) => {
   if (!e.altKey || !/^Digit[1-4]$/.test(e.code)) return;
   e.preventDefault();
   const n = e.code.slice(5);
   setOn(n);
   const pane = panes.find((p) => p.dataset.n === n);
-  if (n === "1") $("#ttyd").focus();
+  if (n === "1") window.chiiTerm?.focus();
   else if (n === "3") $("#todo-input").focus();
   else pane.querySelector("button")?.focus();
 });
+
+// start.cmd 가 연 앱 창(주소창 없는 창)은 Edge 가 처음에 좁게 연다. 그러면 칸이 한 줄로 쌓인다.
+// 처음 한 번만 넉넉하게 키워 가운데 둔다. 그 뒤 크기는 Edge 가 창마다 기억하므로 사용자가 바꾼 대로 남는다.
+(() => {
+  // 앱 창에서도 locationbar.visible 은 true 로 나온다(Edge 157 확인). 앱 창인지는 display-mode 로 가린다.
+  if (!matchMedia("(display-mode: standalone)").matches) return;
+  try { if (localStorage.getItem("chii-sized")) return; localStorage.setItem("chii-sized", "1"); } catch { return; }
+  if (window.outerWidth >= 1280) return;
+  const w = Math.min(1480, screen.availWidth);
+  const h = Math.min(940, screen.availHeight);
+  window.resizeTo(w, h);
+  window.moveTo((screen.availLeft || 0) + (screen.availWidth - w) / 2, (screen.availTop || 0) + (screen.availHeight - h) / 2);
+})();
 
 tick();
 setInterval(tick, 15000);

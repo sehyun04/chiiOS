@@ -1,0 +1,2 @@
+@xterm/xterm 5.5.0, @xterm/addon-fit 0.10.0, @xterm/addon-web-links 0.12.0 의 lib 빌드 그대로(MIT).
+홈 화면이 인터넷 없이도 뜨게 CDN 대신 여기 둔다. 소스맵 주석만 지웠다.
