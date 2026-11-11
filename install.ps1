@@ -22,13 +22,56 @@ function Invoke-Wsl {
     if ($LASTEXITCODE -ne 0) { Fail "wsl $args (exit $LASTEXITCODE)" }
 }
 
+# $pairs 는 @(원본, 대상) 쌍의 목록. 사용자 폴더 맨 위에 내 계정으로 파일을 못 만드는 PC 가 있었다
+# (i7 데스크톱, 원인 모름. 관리자 창에서는 써졌다). 그래서 액세스 거부면 같은 복사를 관리자 권한으로 다시 한다.
+function Copy-Files($pairs) {
+    try {
+        foreach ($p in $pairs) { Copy-Item -LiteralPath $p[0] -Destination $p[1] -Force -ErrorAction Stop }
+        return
+    } catch {
+        if ($_.CategoryInfo.Category -ne 'PermissionDenied') { Fail "$_" }
+    }
+    Write-Host '이 계정으로는 못 쓴다. 관리자 권한으로 복사한다(UAC 창이 뜬다).'
+    $lines = foreach ($p in $pairs) {
+        $from = $p[0] -replace "'", "''"
+        $to = $p[1] -replace "'", "''"
+        "Copy-Item -LiteralPath '$from' -Destination '$to' -Force"
+    }
+    # 경로에 한글·공백이 섞여도 인자 따옴표가 깨지지 않게 명령을 통째로 인코딩해 넘긴다.
+    $cmd = "`$ErrorActionPreference = 'Stop'`n" + ($lines -join "`n")
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
+    try {
+        $proc = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop `
+            -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', $encoded
+    } catch {
+        Fail "관리자 권한을 받지 못했다: $_"
+    }
+    # 관리자 프로세스는 종료 코드를 못 받아 올 때가 있어($null) 그때는 아래 해시 비교에 맡긴다.
+    if ($null -ne $proc.ExitCode -and $proc.ExitCode -ne 0) {
+        Fail "관리자 권한으로도 복사가 막혔다(exit $($proc.ExitCode)). 백신이 막는지 본다."
+    }
+}
+
 Step 'WSL'
 & wsl.exe --version | Out-Null
 if ($LASTEXITCODE -ne 0) {
     # WSL 기능 설치만 관리자 권한과 재부팅이 필요하다. 그 뒤 단계는 전부 내 계정으로 된다.
     Write-Host 'WSL 이 없다. 관리자 권한으로 설치한다(UAC 창이 뜬다).'
-    Start-Process wsl.exe -Verb RunAs -Wait -ArgumentList '--install', '--no-distribution'
-    Write-Host '재부팅한 뒤 이 스크립트를 다시 돌린다.'
+    try {
+        Start-Process wsl.exe -Verb RunAs -Wait -ArgumentList '--install', '--no-distribution' -ErrorAction Stop
+    } catch {
+        # UAC 를 취소했을 때 아래 RunOnce 까지 걸면 재부팅할 때마다 설치 창이 다시 뜬다.
+        Fail "WSL 설치를 시작하지 못했다: $_"
+    }
+    # 재부팅 뒤 손으로 다시 돌리는 걸 잊기 쉽다(i7 데스크톱에서 "재부팅하니 아무것도 없다").
+    # RunOnce 는 다음 로그온 때 한 번 돌고 Windows 가 지운다. -NoExit 라 결과를 읽을 수 있다.
+    $runOnce = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce'
+    # -Force 로 만들면 이미 있는 키의 값들을 날릴 수 있어서, 없을 때만 만든다.
+    if (-not (Test-Path $runOnce)) { New-Item $runOnce | Out-Null }
+    $resume = "powershell.exe -NoExit -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    if ($Force) { $resume += ' -Force' }
+    Set-ItemProperty $runOnce -Name 'chiiOS-install' -Value $resume
+    Write-Host '재부팅하고 로그온하면 이 스크립트가 저절로 이어 돈다.'
     exit 1
 }
 Write-Host '있다.'
@@ -38,15 +81,14 @@ $src = Join-Path $PSScriptRoot 'wslconfig'
 $dst = Join-Path $env:USERPROFILE '.wslconfig'
 $changed = $false
 if (-not (Test-Path $dst)) {
-    Copy-Item $src $dst -ErrorAction Stop
+    Copy-Files @(, @($src, $dst))
     $changed = $true
     Write-Host "새로 썼다: $dst"
 } elseif ((Get-FileHash $src).Hash -eq (Get-FileHash $dst).Hash) {
     Write-Host '이미 같다.'
 } elseif ($Force) {
     $bak = "$dst.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
-    Copy-Item $dst $bak -ErrorAction Stop
-    Copy-Item $src $dst -Force -ErrorAction Stop
+    Copy-Files @(@($dst, $bak), @($src, $dst))
     $changed = $true
     Write-Host "기존 것을 $bak 로 백업하고 덮어썼다."
 } else {
@@ -55,6 +97,9 @@ if (-not (Test-Path $dst)) {
     Fail "$dst 가 이미 있고 chiiOS 의 $src 와 다르다. 손으로 합치거나 -Force 로 백업 후 덮어쓴다."
 }
 if ($changed) {
+    if ((Get-FileHash $src).Hash -ne (Get-FileHash $dst -ErrorAction SilentlyContinue).Hash) {
+        Fail "$dst 를 썼는데 내용이 $src 와 다르다."
+    }
     # .wslconfig 는 WSL VM 을 새로 띄울 때만 읽는다.
     Invoke-Wsl --shutdown
     Write-Host 'WSL 을 내렸다(새 설정 적용).'

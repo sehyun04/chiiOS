@@ -33,8 +33,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 `install.ps1` 이 하는 일, 순서대로:
 
-1. WSL 이 없으면 관리자 권한으로 설치한다(UAC 창). 이때만 재부팅이 필요하고, 재부팅 뒤 `install.ps1` 을 다시 돌린다.
-2. `wslconfig` 를 `%USERPROFILE%\.wslconfig` 로 복사한다. 이미 다른 내용이 있으면 덮어쓰지 않고 멈춘다(`-Force` 면 백업 후 덮어쓰기).
+1. WSL 이 없으면 관리자 권한으로 설치한다(UAC 창). 이때만 재부팅이 필요하다. 재부팅하고 로그온하면 `install.ps1` 이 PowerShell 창으로 저절로 이어 돈다(`RunOnce` 에 한 번만 걸어 둔다).
+2. `wslconfig` 를 `%USERPROFILE%\.wslconfig` 로 복사한다. 이미 다른 내용이 있으면 덮어쓰지 않고 멈춘다(`-Force` 면 백업 후 덮어쓰기). 사용자 폴더에 내 계정으로 못 쓰는 PC 면(i7 데스크톱이 그랬다) 같은 복사를 관리자 권한으로 다시 한다(UAC 창).
 3. Debian 이 없으면 `wsl --install -d Debian --no-launch` 로 깐다.
 4. Debian 안에서 root 로 `setup.sh` 를 돌린다. `/etc/wsl.conf` 가 바뀌었으면 Debian 을 껐다 켜서 기본 사용자·호스트 이름을 적용한다.
 5. `autostart.ps1` 로 자동 켜기 작업을 건다.
