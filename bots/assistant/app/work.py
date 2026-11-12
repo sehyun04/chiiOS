@@ -47,15 +47,31 @@ def slug(url):
     return m.group(1).lower() if m else ""
 
 
+# 저장소가 작업 폴더 바로 아래에만 있지 않다(포트폴리오는 pf/site). 세 단계까지 찾되, 저장소 안이나
+# 의존성 폴더로는 내려가지 않는다. Windows 파일 시스템을 오가는 비용이 커서 넓게 뒤지지 않는다.
+DEPTH = 3
+SKIP = {"node_modules", ".venv", "venv", "target", "dist", "build", "__pycache__", ".next", ".cache"}
+
+
 def local_repos():
     found = []
+
+    def walk(d, depth):
+        if (d / ".git").exists():
+            found.append(d)
+            return
+        if depth >= DEPTH:
+            return
+        try:
+            subs = sorted(e.path for e in os.scandir(d) if e.is_dir() and e.name not in SKIP and not e.name.startswith("."))
+        except OSError:
+            return
+        for s in subs:
+            walk(Path(s), depth + 1)
+
     for root in ROOTS:
-        if not root.is_dir():
-            continue
-        cands = [root] + sorted(p for p in root.iterdir() if p.is_dir())
-        for d in cands:
-            if (d / ".git").exists():
-                found.append(d)
+        if root.is_dir():
+            walk(root, 0)
     return found
 
 
@@ -73,8 +89,10 @@ def scan_repo(repo, since):
     # (kasaterm: 거노 원본을 추적하고 포크로 올림)가 1086개 '안 올림' 으로 나왔다. 원격이 없는 저장소(대신)는
     # 커밋 전부가 여기 잡히는데, 어디에도 백업이 안 됐다는 뜻이라 그게 맞다.
     code, ahead = git(repo, "rev-list", "--count", "HEAD", "--not", "--remotes")
+    # 폴더 이름보다 원격 저장소 이름이 알아보기 쉽다(pf/site -> Sehyun-portfolio, kasaspace -> chiispace).
+    m = re.search(r"github\.com[:/]+[^/]+/([^/]+?)(?:\.git)?/?$", remote.strip())
     return {
-        "name": repo.name,
+        "name": m.group(1) if m else repo.name,
         "slug": slug(remote.strip()),
         "remote": bool(remote.strip()),
         "commits": commits,
@@ -164,6 +182,14 @@ def _recent_work(since):
     merged = {}
     for r in local:
         key = r["slug"] or f"local:{r['name']}"
+        # 같은 저장소의 작업 사본(worktree, pf/site 와 pf/site-wt-braincrew)은 하나로 합친다. 커밋은 겹치니
+        # SHA 로 합치고, 커밋 안 한 변경은 사본마다 따로라 더한다. 이름은 먼저 찾은(짧은) 쪽을 쓴다.
+        m = merged.get(key)
+        if m:
+            m["commits"].update({c["sha"]: c for c in r["commits"]})
+            m["dirty"] += r["dirty"]
+            m["ahead"] = max(m["ahead"] or 0, r["ahead"] or 0)
+            continue
         merged[key] = {"name": r["name"], "commits": {c["sha"]: c for c in r["commits"]},
                        "dirty": r["dirty"], "ahead": r["ahead"], "local": True, "remote": r["remote"]}
     for r in remote:
