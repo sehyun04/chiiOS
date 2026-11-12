@@ -12,6 +12,8 @@ CHII_HOST="${CHII_HOST:-chiios}"
 TTYD_PORT="${TTYD_PORT:-7681}"
 # 7680 은 Windows 배달 최적화(DoSvc)가 쥐고 있어서 Windows 쪽 localhost 로는 닿지 않는다.
 HOME_PORT="${HOME_PORT:-7682}"
+# 비서 봇 문. 바꾸면 bots/assistant/compose.yaml 의 ASSIST_PORT 도 같이 바꾼다.
+ASSIST_PORT="${ASSIST_PORT:-7683}"
 TTYD_VERSION=1.7.7
 CHII_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -56,7 +58,7 @@ fi
 
 step "기본 패키지"
 apt-get update -q
-apt-get install -y -q ca-certificates curl git htop python3 python3-venv
+apt-get install -y -q ca-certificates curl git htop python3
 
 step "Docker"
 # Debian 저장소의 docker.io 대신 Docker 공식 저장소를 쓴다. compose v2 플러그인이 같이 오고 업데이트가 빠르다.
@@ -173,15 +175,6 @@ step "홈 화면 (포트 $HOME_PORT)"
 install -d /opt/chiios
 rm -rf /opt/chiios/home /opt/chiios/bots
 cp -r "$CHII_DIR/home" "$CHII_DIR/bots" /opt/chiios/
-# 홈 화면은 표준 라이브러리만 쓰지만, 비서만 Anthropic 공식 SDK 를 쓴다. 시스템 python 에 pip 로 얹으면
-# Debian 패키지와 부딪히므로(PEP 668) 따로 venv 를 둔다. 판은 고정한다: 새 판이 나와도 다시 돌린 setup.sh 가 같은 걸 깐다.
-ANTHROPIC_SDK=2.3.0
-if [ ! -x /opt/chiios/venv/bin/python ]; then
-  python3 -m venv /opt/chiios/venv
-fi
-if [ "$(/opt/chiios/venv/bin/python -c 'import anthropic; print(anthropic.__version__)' 2>/dev/null)" != "$ANTHROPIC_SDK" ]; then
-  /opt/chiios/venv/bin/pip install -q --disable-pip-version-check "anthropic==$ANTHROPIC_SDK"
-fi
 cat > /etc/systemd/system/chii-home.service <<EOF
 [Unit]
 Description=chiiOS home screen
@@ -192,9 +185,9 @@ Wants=docker.service
 # 봇을 깨우고 재우려면 docker 그룹이 필요하다. 그 그룹은 $CHII_USER 에게 이미 있다.
 User=$CHII_USER
 WorkingDirectory=/home/$CHII_USER
-Environment=CHII_HOME_PORT=$HOME_PORT CHII_TERM_PORT=$TTYD_PORT
+Environment=CHII_HOME_PORT=$HOME_PORT CHII_TERM_PORT=$TTYD_PORT CHII_ASSIST_PORT=$ASSIST_PORT
 # 터미널 칸처럼 127.0.0.1 에만 묶는다. 봇을 깨우고 재우는 단추가 있는 화면이다.
-ExecStart=/opt/chiios/venv/bin/python /opt/chiios/home/server.py
+ExecStart=/usr/bin/python3 /opt/chiios/home/server.py
 Restart=always
 
 [Install]
@@ -203,6 +196,17 @@ EOF
 systemctl daemon-reload
 systemctl enable chii-home.service
 systemctl restart chii-home.service
+
+step "비서 봇 (포트 $ASSIST_PORT)"
+# 비서는 니나브처럼 따로 도는 봇이다(bots/assistant). 대화와 열쇠는 레포 사본(/opt/chiios)이 아니라
+# 여기 둔다. setup.sh 를 다시 돌릴 때마다 /opt/chiios/bots 는 지우고 새로 깔기 때문이다.
+install -d -m 700 -o "$CHII_USER" -g "$CHII_USER" /var/lib/chiios/assistant
+# 이미지는 매번 굽는다(캐시라 금방). 코드가 바뀌었으면 봇 칸에 '새로 구운 판' 이 떠서 다시 깨울 때 반영된다.
+docker compose --project-directory /opt/chiios/bots/assistant build -q
+# 처음 깔 때만 띄운다. 대장이 재워 둔 비서를 setup.sh 가 다시 깨우지 않게.
+if [ -z "$(docker ps -aq --filter label=com.docker.compose.project=assistant --filter label=com.docker.compose.project.working_dir)" ]; then
+  docker compose --project-directory /opt/chiios/bots/assistant up -d
+fi
 
 step "확인"
 docker --version

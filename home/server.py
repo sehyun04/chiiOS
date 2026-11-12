@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # chiiOS 홈 화면. 봇·할 일·기록을 보여 주고, 터미널 칸은 ttyd 웹소켓을 이어 받아 직접 그린다.
 # 표준 라이브러리만 쓴다. 봇 돌리는 기계에 pip 패키지를 들이면 setup.sh 가 챙길 것이 늘고 업데이트 때 깨질 곳도 는다.
-# 예외는 비서(assistant.py)의 Anthropic SDK 하나다. setup.sh 가 venv 에 판을 고정해 깔고, 없으면 비서만 꺼진다.
+# 비서는 따로 도는 봇(bots/assistant)이라 SDK 도 그 이미지 안에만 있다. 여기서는 [비서] 탭의 말을 넘겨주기만 한다.
+import http.client
 import json
 import os
 import re
@@ -23,6 +24,8 @@ STATE_DIR = Path(os.environ.get("CHII_STATE_DIR", str(Path.home() / ".local/shar
 HOST = os.environ.get("CHII_HOME_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CHII_HOME_PORT", "7682"))
 TERM_PORT = int(os.environ.get("CHII_TERM_PORT", "7681"))
+ASSIST_PORT = int(os.environ.get("CHII_ASSIST_PORT", "7683"))
+ASSIST_PROJECT = "assistant"
 
 TODOS = STATE_DIR / "todos.json"
 EVENTS = STATE_DIR / "events.jsonl"
@@ -136,8 +139,14 @@ def services():
     return {"docker": states[:1] == ["active"], "term": states[1:2] == ["active"]}
 
 
+# compose 가 구운 이미지에는 project 라벨이 박혀서, 같은 이미지를 docker run 으로 잠깐 띄운 컨테이너도
+# 봇으로 잡힌다(11-12 시험 때 오늘 기록에 가짜 '비서 깨어남' 이 찍혔다). 작업 폴더 라벨은 compose 로
+# 띄운 컨테이너에만 붙으므로 그걸로 가린다.
+BOT_LABEL = "label=com.docker.compose.project.working_dir"
+
+
 def bots():
-    code, out = sh(["docker", "ps", "-a", "--filter", "label=com.docker.compose.project", "--format", "{{.ID}}"])
+    code, out = sh(["docker", "ps", "-a", "--filter", BOT_LABEL, "--format", "{{.ID}}"])
     if code != 0:
         return None
     ids = out.split()
@@ -315,7 +324,7 @@ def watch_docker():
     while True:
         try:
             p = subprocess.Popen(
-                ["docker", "events", "--filter", "type=container", "--filter", "label=com.docker.compose.project",
+                ["docker", "events", "--filter", "type=container", "--filter", BOT_LABEL,
                  "--format", "{{json .}}"],
                 stdout=subprocess.PIPE, text=True)
             for line in p.stdout:
@@ -419,7 +428,7 @@ class Handler(BaseHTTPRequestHandler):
             tail = parse_qs(u.query).get("tail", ["200"])[0]
             return self.send_json({"name": bot["name"], "text": bot_logs(bot, tail if tail.isdigit() else 200)})
         if u.path == "/api/assistant":
-            return self.send_json(ASSIST.status())
+            return self.assistant("GET", "/status")
         return self.static(u.path)
 
     def static(self, path):
@@ -490,53 +499,62 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"ok": ok}, 200 if ok else 500)
 
         if u.path == "/api/todos":
-            if not add_todo(data.get("text")):
+            item = add_todo(data.get("text"))
+            if not item:
                 return self.send_json({"error": "빈 할 일"}, 400)
-            return self.send_json({"ok": True})
+            return self.send_json({"ok": True, "item": item})
 
-        m = re.fullmatch(r"/api/todos/(\w+)/(toggle|delete)", u.path)
+        # set 은 비서용: 누를 때마다 뒤집히는 toggle 과 달리 끝냈다/안 했다를 정해서 준다.
+        m = re.fullmatch(r"/api/todos/(\w+)/(toggle|delete|set)", u.path)
         if m:
-            change_todo(m.group(1), m.group(2))
-            return self.send_json({"ok": True})
+            if m.group(2) == "set" and not isinstance(data.get("done"), bool):
+                return self.send_json({"error": "done 은 true/false"}, 400)
+            item = change_todo(m.group(1), m.group(2), data.get("done"))
+            if not item:
+                return self.send_json({"error": "그런 할 일이 없다"}, 404)
+            return self.send_json({"ok": True, "item": item})
 
-        if u.path == "/api/assistant/key":
-            ok, err = ASSIST.save_key(data.get("key"))
-            return self.send_json({"ok": True} if ok else {"error": err}, 200 if ok else 400)
-        if u.path == "/api/assistant/clear":
-            ASSIST.clear()
-            return self.send_json({"ok": True})
-        if u.path == "/api/assistant/chat":
-            return self.assistant_chat(str(data.get("text", "")).strip()[:4000])
+        if u.path in ("/api/assistant/key", "/api/assistant/clear", "/api/assistant/chat"):
+            return self.assistant("POST", "/" + u.path.rsplit("/", 1)[1], data, stream=u.path.endswith("/chat"))
 
         return self.send_error(404)
 
-    def assistant_chat(self, text):
-        if not text:
-            return self.send_json({"error": "빈 말"}, 400)
-        # 답을 글자가 나오는 대로 한 줄짜리 JSON 으로 흘려보낸다. 길이를 모르니 끝은 연결을 닫아 알린다(HTTP/1.0).
+    def assistant(self, method, path, body=None, stream=False):
+        # 비서는 따로 도는 봇(bots/assistant)이다. 홈 화면은 말을 넘겨주기만 하고, 비서 문(7683)은
+        # 브라우저에 직접 내주지 않는다. 출처 검사를 홈 화면 한곳에서만 하려고.
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", ASSIST_PORT, timeout=600 if stream else 30)
+            conn.request(method, path, body=None if body is None else json.dumps(body),
+                         headers={"Host": "localhost", "X-Chii": "1", "Content-Type": "application/json"})
+            resp = conn.getresponse()
+        except OSError:
+            if path == "/status":
+                return self.send_json({"down": True, "missing": find_bot(ASSIST_PROJECT) is None})
+            return self.send_json({"error": "비서가 자고 있어. 깨워 줘."}, 503)
+        if not stream or resp.status != 200:
+            data = resp.read()
+            self.send_response(resp.status)
+            self.send_header("Content-Type", resp.getheader("Content-Type", "application/json"))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            conn.close()
+            return None
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.close_connection = True
-
-        def emit(obj):
-            try:
-                self.wfile.write((json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
-            except OSError:
-                # 화면을 닫아도 대화는 끝까지 가서 기록에 남는다. 다음에 열면 보인다.
-                pass
-
-        ASSIST.chat(text, emit)
-
-
-import assistant  # noqa: E402  위 함수들을 비서의 도구로 넘겨야 해서 여기서 부른다.
-
-ASSIST = assistant.Assistant(STATE_DIR, assistant.World(
-    system_info=system_info, services=services, bots=bots, find_bot=find_bot,
-    todos=visible_todos, events=events, add_todo=add_todo, change_todo=change_todo,
-    bot_act=bot_act, bot_logs=bot_logs,
-))
+        # 줄이 오는 대로 바로 넘긴다. 모아서 넘기면 답이 한꺼번에 툭 떨어진다.
+        try:
+            for line in resp:
+                self.wfile.write(line)
+        except OSError:
+            # 화면을 닫아도 비서는 대화를 끝까지 마치고 기록에 남긴다.
+            pass
+        conn.close()
+        return None
 
 
 def main():

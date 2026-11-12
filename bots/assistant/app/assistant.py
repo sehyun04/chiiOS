@@ -1,34 +1,30 @@
-# chiiOS 비서. 홈 화면 1번 칸 [비서] 탭에서 대장과 이야기하고, 할 일·봇·기록을 대신 만진다.
-# 머리는 Anthropic API(비서 전용 키). 도구는 홈 화면 서버(server.py)의 함수를 그대로 빌려 쓴다.
-# 화면 단추와 비서가 같은 함수를 지나가야 기록·확인 창 규칙이 한 곳에서만 정해진다.
+# chiiOS 비서 봇의 머리. 대장과 이야기하고, 할 일·봇·기록은 홈 화면 서버에 부탁해서 만진다.
+# 머리는 Anthropic API(비서 전용 키). 대화와 열쇠는 이 봇의 데이터 폴더(/data)에만 둔다.
 import json
 import os
 import re
+import sys
 import threading
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
-try:
-    import anthropic
-except ImportError:
-    # venv 없이 시스템 python 으로 돌 때. 홈 화면은 살리고 비서만 끈다.
-    anthropic = None
+import anthropic
 
-# 평소 일(할 일 넣기, 상태 묻기)은 가볍고 싼 모델로 충분하다. 바꾸려면 chii-home 환경 변수로.
-MODEL = os.environ.get("CHII_ASSIST_MODEL", "claude-haiku-5-5")
-EFFORT = os.environ.get("CHII_ASSIST_EFFORT", "low")
-KEY_FILE = Path(os.environ.get("CHII_ASSIST_KEY", str(Path.home() / ".config/chiios/anthropic-key")))
-# 대화가 길어질수록 매번 보내는 양이 늘어 값이 오른다. 오늘 일을 다루는 비서라 최근 것만 기억한다.
+import home
+
+# 평소 일(할 일 넣기, 상태 묻기)은 가볍고 싼 모델로 충분하다. 바꾸려면 compose.yaml 환경 변수로.
+MODEL = os.environ.get("ASSIST_MODEL", "claude-haiku-5-5")
+EFFORT = os.environ.get("ASSIST_EFFORT", "low")
+SELF = "assistant"
+# 대화가 길어질수록 매번 보내는 양이 늘어 값이 오른다. 최근 것만 기억한다.
 HISTORY_TURNS = 20
 # 도구를 부르고 결과를 읽는 왕복의 상한. 넘으면 끊고 그때까지 한 것만 말한다.
 MAX_STEPS = 6
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 DAYS = "월화수목금토일"
 
-SYSTEM = """너는 chiiOS 의 비서다. chiiOS 는 대장이 디스코드 봇을 돌리려고 WSL 위에 꾸린 Debian 이고, 너는 그 홈 화면 1번 칸에서 대장과 이야기한다. 홈 화면에는 2번 봇 칸, 3번 오늘 할 일 칸, 4번 오늘 기록 칸이 같이 떠 있다.
+SYSTEM = """너는 chiiOS 의 비서 봇이다. chiiOS 는 대장이 디스코드 봇을 돌리려고 WSL 위에 꾸린 Debian 이고, 너는 그 안에서 컨테이너로 돌며 홈 화면 1번 칸 [비서] 탭에서 대장과 이야기한다. 홈 화면에는 2번 봇 칸, 3번 오늘 할 일 칸, 4번 오늘 기록 칸이 같이 떠 있다. 봇 목록의 비서(assistant)는 너 자신이다.
 
 말투
 - 대장을 "대장"이라고 부르고, 다정하고 짧은 반말로 말한다. 보통 한두 문장, 길어도 다섯 줄.
@@ -43,6 +39,7 @@ SYSTEM = """너는 chiiOS 의 비서다. chiiOS 는 대장이 디스코드 봇�
 지켜야 할 것
 - 상태는 "지금 상태"와 도구 결과만 믿는다. 모르는 건 지어내지 말고 모른다고 한다.
 - 니나브(loa-bot)는 Oracle 서버에서 도는 운영 봇과 디스코드 토큰이 같아서, 둘이 같이 켜지면 응답이 꼬인다. 그래서 깨우기 전 주의가 있는 봇의 start 는 바로 깨우지 않고 대장 화면에 확인 단추를 띄운다. 그때는 단추를 눌러 달라고 안내하고, 깨웠다고 말하지 않는다.
+- 너 자신은 재울 수 없다. 재우고 싶다고 하면 봇 칸의 재우기 단추를 쓰라고 안내한다.
 - 도구가 실패하면 실패했다고 그대로 말한다.
 - 터미널 명령을 대신 칠 수는 없다. 필요하면 대장이 칠 명령을 알려 준다(1번 칸 터미널 탭)."""
 
@@ -81,8 +78,8 @@ TOOLS = [
         "name": "bot_control",
         "description": (
             "봇을 깨우거나(start) 재우거나(stop) 다시 굽는다(bake). 깨우기 전 주의가 있는 봇의 start 는 "
-            "바로 깨우지 않고 대장 화면에 확인 단추를 띄운다. bake 는 코드를 새로 가져와 이미지만 다시 만들고 "
-            "봇을 띄우지는 않으며 몇 분 걸린다."
+            "바로 깨우지 않고 대장 화면에 확인 단추를 띄운다. bake 는 이미지만 다시 만들고 봇을 띄우지는 않으며 "
+            "몇 분 걸린다."
         ),
         "input_schema": {
             "type": "object",
@@ -111,20 +108,6 @@ for _t in TOOLS:
     _t["eager_input_streaming"] = True
 
 
-@dataclass
-class World:
-    system_info: Callable
-    services: Callable
-    bots: Callable
-    find_bot: Callable
-    todos: Callable
-    events: Callable
-    add_todo: Callable
-    change_todo: Callable
-    bot_act: Callable
-    bot_logs: Callable
-
-
 def span(sec):
     m = int(max(0, sec) // 60)
     if m < 1:
@@ -149,22 +132,52 @@ def bot_status(b):
     return f"쓰러짐(exit {b['exitCode']})"
 
 
-def read_key():
-    try:
-        return KEY_FILE.read_text(encoding="utf-8").strip() or None
-    except OSError:
-        return None
+def say(line):
+    # docker logs 로 보이는 줄. 봇 칸의 기록 단추가 이걸 보여 준다. 대화 내용은 남기지 않는다.
+    print(f"{datetime.now():%m-%d %H:%M:%S} {line}", file=sys.stdout, flush=True)
 
 
 class Assistant:
-    def __init__(self, state_dir, world):
-        self.world = world
-        self.chat_file = Path(state_dir) / "chat.jsonl"
-        self.archive = Path(state_dir) / "chat-archive"
+    def __init__(self, data_dir):
+        data = Path(data_dir)
+        self.key_file = data / "anthropic-key"
+        self.chat_file = data / "chat.jsonl"
+        self.archive = data / "chat-archive"
         self.busy = threading.Lock()
         self.file_lock = threading.Lock()
 
-    # 기록 ---------------------------------------------------------------
+    # 열쇠 ---------------------------------------------------------------
+
+    def read_key(self):
+        try:
+            return self.key_file.read_text(encoding="utf-8").strip() or None
+        except OSError:
+            return None
+
+    def save_key(self, key):
+        key = str(key or "").strip()
+        if not key.startswith("sk-ant-") or len(key) < 30 or any(c.isspace() for c in key):
+            return False, "열쇠 모양이 아니야. sk-ant- 로 시작하는 API 키를 통째로 넣어 줘."
+        # 저장하기 전에 한 번 맞춰 본다. 모델 정보 읽기는 토큰을 쓰지 않는다.
+        try:
+            anthropic.Anthropic(api_key=key, timeout=15.0, max_retries=1).models.retrieve(MODEL)
+        except anthropic.AuthenticationError:
+            return False, "열쇠가 안 맞아. 지운 키거나 잘못 복사한 것 같아."
+        except anthropic.PermissionDeniedError:
+            return False, f"이 열쇠로는 {MODEL} 을 못 써. 키의 작업 공간 설정을 봐 줘."
+        except anthropic.APIConnectionError:
+            return False, "Anthropic 에 안 닿아. 인터넷을 봐 줘."
+        except anthropic.APIStatusError as e:
+            return False, f"맞춰 보다 막혔어 ({e.status_code})."
+        # 처음부터 600 으로 만든다. 쓰고 나서 바꾸면 그 사이 잠깐 남이 읽을 수 있다.
+        fd = os.open(self.key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(key + "\n")
+        os.chmod(self.key_file, 0o600)
+        say("열쇠 바꿈")
+        return True, None
+
+    # 대화 기록 -----------------------------------------------------------
 
     def turns(self):
         out = []
@@ -181,51 +194,24 @@ class Assistant:
 
     def append(self, rec):
         with self.file_lock:
-            self.chat_file.parent.mkdir(parents=True, exist_ok=True)
             with self.chat_file.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     def clear(self):
-        # 지우지 않고 옮겨 둔다. 나중에 비서가 지난 대화를 찾아볼 일이 생길 수 있다.
+        # 지우지 않고 옮겨 둔다. 나중에 지난 대화를 찾아볼 일이 생길 수 있다.
         with self.file_lock:
             if self.chat_file.exists() and self.chat_file.stat().st_size:
-                self.archive.mkdir(parents=True, exist_ok=True)
+                self.archive.mkdir(exist_ok=True)
                 self.chat_file.replace(self.archive / datetime.now().strftime("chat-%Y%m%d-%H%M%S.jsonl"))
 
     def status(self):
         return {
-            "sdk": anthropic is not None,
-            "hasKey": read_key() is not None,
+            "sdk": True,
+            "hasKey": self.read_key() is not None,
             "model": MODEL,
             "busy": self.busy.locked(),
             "turns": self.turns()[-60:],
         }
-
-    def save_key(self, key):
-        key = str(key or "").strip()
-        if not key.startswith("sk-ant-") or len(key) < 30 or any(c.isspace() for c in key):
-            return False, "열쇠 모양이 아니야. sk-ant- 로 시작하는 API 키를 통째로 넣어 줘."
-        if anthropic is None:
-            return False, "비서 부품(anthropic SDK)이 없어. setup.sh 를 다시 돌려 줘."
-        # 저장하기 전에 한 번 맞춰 본다. 모델 정보 읽기는 토큰을 쓰지 않는다.
-        try:
-            anthropic.Anthropic(api_key=key, timeout=15.0, max_retries=1).models.retrieve(MODEL)
-        except anthropic.AuthenticationError:
-            return False, "열쇠가 안 맞아. 지운 키거나 잘못 복사한 것 같아."
-        except anthropic.PermissionDeniedError:
-            return False, f"이 열쇠로는 {MODEL} 을 못 써. 키의 작업 공간 설정을 봐 줘."
-        except anthropic.APIConnectionError:
-            return False, "Anthropic 에 안 닿아. 인터넷을 봐 줘."
-        except anthropic.APIStatusError as e:
-            return False, f"맞춰 보다 막혔어 ({e.status_code})."
-        KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(KEY_FILE.parent, 0o700)
-        # 처음부터 600 으로 만든다. 쓰고 나서 바꾸면 그 사이 잠깐 남이 읽을 수 있다.
-        fd = os.open(KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(key + "\n")
-        os.chmod(KEY_FILE, 0o600)
-        return True, None
 
     # 맥락 ---------------------------------------------------------------
 
@@ -254,34 +240,34 @@ class Assistant:
         return msgs
 
     def snapshot(self):
-        w = self.world
         now = datetime.now()
         lines = [f"지금 상태 ({now:%Y-%m-%d %H:%M} {DAYS[now.weekday()]}요일)"]
-        try:
-            s = w.system_info()
-            gib = 2 ** 30
-            lines.append(
-                f"- {s['os']} · 깨어 있은 지 {span(s['uptime'])} · 메모리 {s['memUsed'] / gib:.1f} / "
-                f"{s['memTotal'] / gib:.1f} GB · 디스크 {s['diskUsed'] / gib:.1f} GB 씀"
-            )
-            sv = w.services()
-            lines.append(f"- Docker {'켜짐' if sv['docker'] else '꺼짐'} · 브라우저 터미널 {'켜짐' if sv['term'] else '꺼짐'}")
-        except Exception as e:  # 상태 한 줄이 깨져도 대화는 이어 간다.
-            lines.append(f"- 시스템 상태를 못 읽음 ({e})")
+        st = home.state()
+        if not st:
+            lines.append("- 홈 화면 서버에 닿지 않아 상태를 모른다")
+            return "\n".join(lines)
+        s = st["sys"]
+        gib = 2 ** 30
+        lines.append(
+            f"- {s['os']} · 깨어 있은 지 {span(s['uptime'])} · 메모리 {s['memUsed'] / gib:.1f} / "
+            f"{s['memTotal'] / gib:.1f} GB · 디스크 {s['diskUsed'] / gib:.1f} GB 씀"
+        )
+        sv = st["services"]
+        lines.append(f"- Docker {'켜짐' if sv['docker'] else '꺼짐'} · 브라우저 터미널 {'켜짐' if sv['term'] else '꺼짐'}")
 
         lines.append("봇 (이름 / project / 상태)")
-        bots = w.bots()
+        bots = st["bots"]
         if bots is None:
             lines.append("- Docker 에 닿지 않아 봇 상태를 모른다")
         elif not bots:
             lines.append("- 올린 봇이 없다")
+        nowt = time.time()
         for b in bots or []:
-            nowt = time.time()
-            since = f"일한 지 {span(nowt - b['startedAt'])}" if b["state"] == "running" and b["startedAt"] \
-                else (f"쉰 지 {span(nowt - b['finishedAt'])}" if b["finishedAt"] else "")
             extra = []
-            if since:
-                extra.append(since)
+            if b["state"] == "running" and b.get("startedAt"):
+                extra.append(f"일한 지 {span(nowt - b['startedAt'])}")
+            elif b.get("finishedAt"):
+                extra.append(f"쉰 지 {span(nowt - b['finishedAt'])}")
             if b.get("commit"):
                 extra.append(f"커밋 {b['commit']} {b.get('subject', '')}".strip())
             if b.get("baking"):
@@ -293,31 +279,22 @@ class Assistant:
             lines.append(f"- {b['name']} / {b['project']} / {bot_status(b)}" + (" · " + " · ".join(extra) if extra else ""))
 
         lines.append("할 일 (id · 내용 · 상태)")
-        todos = w.todos()
-        if not todos:
+        if not st["todos"]:
             lines.append("- 없음")
-        for t in todos:
+        for t in st["todos"]:
             lines.append(f"- {t['id']} · {t['text']} · {'끝냄' if t['done'] else '남음'}")
 
         lines.append("오늘 기록")
-        evs = w.events()
-        if not evs:
+        if not st["events"]:
             lines.append("- 아직 없음")
-        for e in evs:
+        for e in st["events"]:
             lines.append(f"- {datetime.fromtimestamp(e['t']):%H:%M} {e['text']}")
         return "\n".join(lines)
 
     # 도구 ---------------------------------------------------------------
 
-    def todo_text(self, tid):
-        for t in self.world.todos():
-            if t["id"] == tid:
-                return t["text"]
-        return None
-
     def run_tool(self, name, args):
         """(모델에게 줄 결과, 화면에 띄울 한 줄, 확인 단추 정보, 실패 여부)"""
-        w = self.world
         if not isinstance(args, dict):
             return "입력이 객체가 아니다", None, None, True
 
@@ -325,62 +302,79 @@ class Assistant:
             text = args.get("text")
             if not isinstance(text, str) or not text.strip():
                 return "text 가 비었다", None, None, True
-            item = w.add_todo(text)
+            code, data = home.add_todo(text)
+            if code != 200:
+                return f"못 더했다: {data.get('error', code)}", "할 일 더하기 실패", None, True
+            item = data["item"]
             return json.dumps({"id": item["id"], "text": item["text"]}, ensure_ascii=False), f"할 일 더함 · {item['text']}", None, False
 
         if name in ("update_todo", "delete_todo"):
             tid = args.get("id")
-            if not isinstance(tid, str):
+            if not isinstance(tid, str) or not tid:
                 return "id 가 없다", None, None, True
             if name == "update_todo":
                 done = args.get("done")
                 if not isinstance(done, bool):
                     return "done 은 true/false 여야 한다", None, None, True
-                t = w.change_todo(tid, "set", done)
-                if not t:
-                    return f"{tid} 라는 할 일이 없다", None, None, True
-                return "바꿨다", f"{'할 일 끝' if done else '할 일 되돌림'} · {t['text']}", None, False
-            t = w.change_todo(tid, "delete")
-            if not t:
+                code, data = home.set_todo(tid, done)
+                word = "할 일 끝" if done else "할 일 되돌림"
+            else:
+                code, data = home.delete_todo(tid)
+                word = "할 일 지움"
+            if code == 404:
                 return f"{tid} 라는 할 일이 없다", None, None, True
-            return "지웠다", f"할 일 지움 · {t['text']}", None, False
+            if code != 200:
+                return f"실패: {data.get('error', code)}", f"{word} 실패", None, True
+            return "됐다", f"{word} · {data['item']['text']}", None, False
 
         if name in ("bot_control", "bot_logs"):
             project = args.get("project")
-            bot = w.find_bot(project) if isinstance(project, str) else None
-            if not bot:
-                return f"{project} 라는 봇이 없다", None, None, True
+            if not isinstance(project, str) or not project:
+                return "project 가 없다", None, None, True
             if name == "bot_logs":
                 lines = args.get("lines", 60)
                 lines = max(1, min(200, lines if isinstance(lines, int) else 60))
-                text = ANSI.sub("", w.bot_logs(bot, lines)).strip()
+                code, data = home.logs(project, lines)
+                if code == 404:
+                    return f"{project} 라는 봇이 없다", None, None, True
+                if code != 200:
+                    return f"기록을 못 읽었다: {data.get('error', code)}", None, None, True
+                text = ANSI.sub("", data.get("text", "")).strip()
                 # 기록이 길어도 모델에게는 끝부분만. 원인은 대개 마지막 몇십 줄에 있다.
                 if len(text) > 8000:
                     text = "...(앞은 잘림)\n" + text[-8000:]
-                return text or "(기록이 비었다)", f"{bot['name']} 기록 {lines}줄 읽음", None, False
+                return text or "(기록이 비었다)", f"{data.get('name', project)} 기록 {lines}줄 읽음", None, False
             action = args.get("action")
             if action not in ("start", "stop", "bake"):
                 return "action 은 start, stop, bake 중 하나다", None, None, True
-            if action == "start" and bot["guard"]:
-                confirm = {"project": bot["project"], "name": bot["name"], "guard": bot["guard"]}
-                return ("깨우지 않았다. 대장 화면에 확인 단추를 띄웠다. 대장이 직접 눌러야 깨어난다.",
-                        f"{bot['name']} 깨우기 확인 단추 띄움", confirm, False)
-            if action == "bake" and not bot["canBake"]:
-                return "이 봇은 굽는 스크립트가 없다", None, None, True
-            ok = w.bot_act(bot, action)
+            if project == SELF and action == "stop":
+                return "비서는 자기 자신을 재울 수 없다. 봇 칸의 재우기 단추를 쓰라고 안내한다.", None, None, True
             word = {"start": "깨움", "stop": "재움", "bake": "굽기 시작"}[action]
-            if not ok:
-                return f"{word} 실패. 봇 칸의 기록 단추로 이유를 볼 수 있다.", f"{bot['name']} {word} 실패", None, True
-            return f"{word} 됐다", f"{bot['name']} {word}", None, False
+            code, data = home.bot(project, action)
+            if code == 409 and data.get("guard"):
+                name_ = self.bot_name(project)
+                confirm = {"project": project, "name": name_, "guard": data["guard"]}
+                return ("깨우지 않았다. 대장 화면에 확인 단추를 띄웠다. 대장이 직접 눌러야 깨어난다.",
+                        f"{name_} 깨우기 확인 단추 띄움", confirm, False)
+            if code == 404:
+                return f"{project} 라는 봇이 없다", None, None, True
+            name_ = self.bot_name(project)
+            if code != 200:
+                return f"{word} 실패({data.get('error', code)}). 봇 칸의 기록 단추로 이유를 볼 수 있다.", f"{name_} {word} 실패", None, True
+            return f"{word} 됐다", f"{name_} {word}", None, False
 
         return f"{name} 라는 도구는 없다", None, None, True
+
+    def bot_name(self, project):
+        st = home.state() or {}
+        for b in st.get("bots") or []:
+            if b["project"] == project:
+                return b["name"]
+        return project
 
     # 대화 ---------------------------------------------------------------
 
     def chat(self, text, emit):
-        if anthropic is None:
-            emit({"t": "error", "code": "sdk", "d": "비서 부품(anthropic SDK)이 없어. setup.sh 를 다시 돌려 줘."})
-            return
         if not self.busy.acquire(blocking=False):
             emit({"t": "error", "code": "busy", "d": "아직 앞 말에 답하는 중이야."})
             return
@@ -390,7 +384,7 @@ class Assistant:
             self.busy.release()
 
     def _chat(self, text, emit):
-        key = read_key()
+        key = self.read_key()
         if not key:
             emit({"t": "error", "code": "key", "d": "비서 열쇠가 없어."})
             return
@@ -405,6 +399,7 @@ class Assistant:
         gap = False  # 도구를 다녀온 뒤 이어지는 말은 줄을 바꿔 붙인다.
         json_retries = 0
         step = 0
+        started = time.time()
         while step < MAX_STEPS:
             step += 1
             try:
@@ -502,4 +497,6 @@ class Assistant:
             "t": time.time(), "role": "assistant", "text": reply, "tools": chips,
             "confirm": confirm, "error": error, "code": code, "model": MODEL, "usage": usage,
         })
+        say(f"대화 한 번 · {time.time() - started:.1f}초 · 토큰 {usage['in']}/{usage['out']} · 도구 {len(chips)}개"
+            + (f" · 오류 {code}" if code else ""))
         emit({"t": "done"})

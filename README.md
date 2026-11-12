@@ -66,14 +66,23 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ## 비서
 
-홈 화면 1번 칸 [비서] 탭. 홈 화면의 상태(봇, 할 일, 오늘 기록, 메모리·디스크)를 매번 같이 받아 보고 대답한다.
+니나브처럼 따로 도는 봇(`bots/assistant/`, 컨테이너 `assistant`)이다. 봇 칸에 "비서"로 뜨고, 홈 화면 1번 칸 [비서] 탭이 이 봇과 이야기하는 창이다.
 
-- 할 줄 아는 것: 오늘 정리, 할 일 더하기·끝내기·지우기, 봇 상태 묻기·깨우기·재우기·다시 굽기·기록 읽기. 터미널 명령은 대신 치지 않는다.
-- 니나브처럼 깨우기 전 주의가 있는 봇은 비서가 바로 깨우지 않고 대화 안에 확인 단추를 띄운다. 단추는 띄운 지 10분 안의 마지막 것만 눌린다.
-- 머리: Anthropic API, 기본 모델 `claude-haiku-5-5`(effort `low`). 바꾸려면 `chii-home.service` 에 `CHII_ASSIST_MODEL`·`CHII_ASSIST_EFFORT` 환경 변수를 준다. SDK 는 `anthropic==2.3.0` 을 `/opt/chiios/venv` 에 고정해 깐다(`setup.sh`).
-- 열쇠: 처음 열면 [비서] 탭에 열쇠 칸이 뜬다. 넣으면 한 번 맞춰 본 뒤 Debian 안 `~/.config/chiios/anthropic-key`(600)에만 저장하고, 화면과 API 응답에는 다시 내보내지 않는다.
+```
+홈 화면 [비서] 탭 ──> chii-home(7682) ──> 비서 봇(7683) ──> Anthropic
+                          ^                    │
+                          └── 할 일·봇·상태 ───┘
+```
+
+- 할 줄 아는 것: 오늘 정리, 할 일 더하기·끝내기·지우기, 봇 상태 묻기·깨우기·재우기·다시 굽기·기록 읽기. 터미널 명령은 대신 치지 않는다. 앞으로 제어·검증·검토, 트렌드 파악을 도구로 하나씩 붙인다.
+- 비서는 Docker 를 직접 만지지 않고 홈 화면 API 에 부탁한다. 그래서 니나브 깨우기 전 확인 같은 규칙은 홈 화면 한곳에만 있다. 주의가 있는 봇을 깨우라고 하면 대화 안에 확인 단추가 뜨고, 단추는 띄운 지 10분 안의 마지막 것만 눌린다. 비서는 자기 자신을 재우지 못한다.
+- 머리: Anthropic API, 기본 모델 `claude-haiku-5-5`(effort `low`). 바꾸려면 `bots/assistant/compose.yaml` 에 `ASSIST_MODEL`·`ASSIST_EFFORT` 를 준다. SDK 는 이미지 안에만 `anthropic==2.3.0` 으로 고정해 깐다(`requirements.txt`). 홈 화면 서버는 표준 라이브러리만 쓴다.
+- 열쇠: 처음 열면 [비서] 탭에 열쇠 칸이 뜬다. 넣으면 한 번 맞춰 본 뒤 `/var/lib/chiios/assistant/anthropic-key`(600)에만 저장하고, 화면과 API 응답에는 다시 내보내지 않는다.
 - 같은 Anthropic 계정 안의 키는 잔액을 같이 쓴다. 비서가 잔액을 다 쓰면 니나브 답변도 멈추므로, Console 에서 월 한도를 건 작업 공간(`chiiOS`)을 만들고 그 안에서 만든 키를 넣는다.
-- 대화는 `~/.local/share/chiios/chat.jsonl` 에 쌓이고, 모델에게는 최근 20마디만 보낸다. [새 대화] 를 누르면 지우지 않고 `chat-archive/` 로 옮긴다.
+- 대화는 `/var/lib/chiios/assistant/chat.jsonl` 에 쌓이고, 모델에게는 최근 20마디만 보낸다. [새 대화] 를 누르면 지우지 않고 `chat-archive/` 로 옮긴다. 레포 사본(`/opt/chiios`)은 `setup.sh` 때마다 새로 깔리므로 대화·열쇠는 거기 두지 않는다.
+- `setup.sh` 는 비서 이미지를 매번 굽고, 처음 깔 때만 띄운다(재워 둔 비서를 다시 깨우지 않게). 코드가 바뀌면 봇 칸에 '새로 구운 판' 이 뜨고, 재웠다 깨우면 바뀐다.
+- 비서 문(7683)은 홈 화면만 두드린다. Windows 브라우저에서도 열리는 주소라 `Host` 와 `X-Chii` 를 보고 막는다.
+- 레포를 따로 뗄지는 아직 정하지 않았다. `bots/assistant/` 가 혼자 굽고 돌 수 있게 묶여 있어서, 떼기로 하면 `git subtree split --prefix=bots/assistant` 로 이력째 옮긴다.
 
 ## 상시 운영 PC 에서 챙길 것
 
@@ -85,6 +94,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 | 봇 | 자리 | 평소 상태 |
 |---|---|---|
 | 니나브(loa-bot) | Debian 안 `~/loa-bot` | 이미지만 있고 꺼 둔다 |
+| 비서(assistant) | 레포 `bots/assistant/` (사본 `/opt/chiios/bots/assistant`) | 늘 깨어 있다 |
 
 - 홈 화면 봇 칸의 단추: 깨우기·재우기(`docker compose up -d`·`stop`), 다시 굽기(`bots/<봇>.sh`), 기록(`docker logs` 마지막 300줄).
 - 봇 이름과 깨우기 전 주의 문구는 `bots/bots.json` 에 둔다. 주의 문구가 있는 봇은 깨우기를 누르면 확인 창이 먼저 뜬다.
@@ -106,6 +116,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 - 브라우저 터미널과 홈 화면은 `127.0.0.1` 에만 열려 있다. 셸과 봇 단추를 통째로 내주는 것이라 다른 기기에서 열려면 Tailscale 같은 인증을 먼저 둔다.
 - 비서 열쇠·대화·확인 단추도 같은 규칙 아래 있다. 열쇠를 넣는 요청은 POST 라 `X-Chii` 머리글 없이는 안 받는다.
+- 봇은 compose 로 띄운 컨테이너(작업 폴더 라벨이 있는 것)만 센다. compose 가 구운 이미지에는 project 라벨이 박혀 있어서, 시험 삼아 `docker run` 한 컨테이너까지 봇으로 잡혀 오늘 기록이 더러워진 적이 있다.
 - 다른 사이트가 몰래 요청하지 못하게, 홈 화면은 `localhost` 이름으로 온 요청만 받고 바꾸는 요청(POST)에는 `X-Chii: 1` 머리글을 요구한다. ttyd 는 `--check-origin` 으로 다른 출처의 웹소켓을 막는다.
 - 터미널 칸의 웹소켓(`/term/ws`)은 홈 화면 서버가 ttyd 로 바이트 그대로 잇는다. `Origin` 이 홈 화면(`http://localhost:7682`)이 아니면 403 이다. ttyd 쪽으로 넘길 때는 Origin·Host 를 ttyd 주소로 맞춰 `--check-origin` 도 그대로 통과한다.
 - 터미널 글꼴 D2Coding(OFL, 예약 이름 D2Coding)은 글리프를 건드리지 않고 woff2 로만 다시 싸서 `home/static/fonts/` 에 둔다. 보는 PC 에 글꼴이 없어도 한글 폭이 맞는다. xterm 5.5 는 `home/static/vendor/xterm/`(MIT).

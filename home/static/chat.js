@@ -157,7 +157,7 @@
 
   function keyForm(message) {
     const li = hello("비서 열쇠가 아직 없어",
-      "Claude Console 에서 만든 비서 전용 API 키를 넣어 줘. Debian 안(~/.config/chiios)에만 저장되고 화면에는 다시 나오지 않아.");
+      "Claude Console 에서 만든 비서 전용 API 키를 넣어 줘. 비서 봇 안(/var/lib/chiios/assistant)에만 저장되고 화면에는 다시 나오지 않아.");
     li.classList.add("key");
     const f = el("form", "key-form");
     const k = el("input");
@@ -200,6 +200,31 @@
     li.append(f, err, el("span", "dim small", "니나브와 잔액을 같이 쓰니까, 월 한도를 걸어 둔 작업 공간에서 만든 키가 좋아."));
   }
 
+  // 비서는 따로 도는 봇이라 재워 둘 수 있다. 그때는 여기서 바로 깨운다(봇 칸 깨우기와 같은 길).
+  function sleeping() {
+    const li = hello("비서가 자고 있어", "깨우면 바로 이야기할 수 있어");
+    const b = el("button", "glass primary", "비서 깨우기");
+    b.type = "button";
+    b.style.marginTop = "14px";
+    b.onclick = async () => {
+      b.disabled = true;
+      b.textContent = "깨우는 중";
+      try { await post("/api/bots/assistant/start"); } catch {}
+      // 컨테이너가 떠도 문을 여는 데 잠깐 걸린다. 문이 열릴 때까지 기다렸다가 다시 그린다.
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+          const s = await (await fetch("/api/assistant", { cache: "no-store" })).json();
+          if (!s.down) break;
+        } catch {}
+      }
+      window.chiiRefresh?.();
+      await load();
+      focusChat();
+    };
+    li.append(b);
+  }
+
   function renderTurns(turns) {
     const now = Date.now() / 1000;
     let last = -1;
@@ -222,11 +247,13 @@
       info = null;
     }
     log.replaceChildren();
-    const ok = !!info && info.sdk && info.hasKey;
+    const ok = !!info && !info.down && info.hasKey;
     input.disabled = sendBtn.disabled = !ok;
-    input.placeholder = ok ? "비서에게 말 걸기  ·  Enter 보내기, Shift+Enter 줄바꿈" : "열쇠를 넣으면 말을 걸 수 있어";
+    input.placeholder = ok ? "비서에게 말 걸기  ·  Enter 보내기, Shift+Enter 줄바꿈"
+      : info && info.down ? "비서를 깨우면 말을 걸 수 있어" : "열쇠를 넣으면 말을 걸 수 있어";
     if (!info) hello("집이랑 연락이 끊겼어", "홈 화면 서버가 꺼진 것 같아.");
-    else if (!info.sdk) hello("비서 부품이 없어", "Windows 쪽 chiiOS 폴더에서 setup.sh 를 다시 돌리면 깔린다.");
+    else if (info.down && info.missing) hello("비서 봇이 아직 없어", "Windows 쪽 chiiOS 폴더에서 setup.sh 를 다시 돌리면 구워서 깨운다.");
+    else if (info.down) sleeping();
     else if (!info.hasKey) keyForm();
     else if (!info.turns.length) greet();
     else {
