@@ -10,6 +10,8 @@
 - 비서: 홈 화면 1번 칸 [비서] 탭. 오늘 정리, 할 일 관리, 봇 돌보기를 말로 한다(아래 '비서')
 - 브라우저 터미널: ttyd 1.7.7, `http://localhost:7681` (`chii-term.service`). 홈 화면 1번 칸 [터미널] 탭은 이 ttyd 에 웹소켓으로 붙어 xterm 으로 직접 그린다
 - 바탕화면·시작 메뉴의 `chiiOS` 바로가기: 홈 화면을 주소창 없는 Edge 앱 창으로 연다
+- `chii` 명령: 터미널에서 홈 화면과 같은 일(상태, 봇, 할 일, 오늘 기록, 백업, 업데이트)
+- 새 판 알림: 레포에 새 커밋이 생기면 상태줄에 '새 판 N개' 가 뜨고, 누르면 받아서 다시 깐다
 - 사용자 `sehyun`, 호스트 이름 `chiios`
 - 꺼진 Debian 을 다시 켜는 작업 스케줄러 작업 `chiiOS`
 
@@ -58,11 +60,38 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 | 끄기 | `wsl --terminate Debian` (WSL 전체는 `wsl --shutdown`). 자동 켜기가 걸려 있으면 5분 안에 다시 켜진다 |
 | 자동 켜기 걸기·떼기 | `powershell -ExecutionPolicy Bypass -File autostart.ps1` (떼기는 뒤에 `-Remove`) |
 | 바로가기 만들기·지우기 | `powershell -ExecutionPolicy Bypass -File shortcut.ps1` (지우기는 뒤에 `-Remove`) |
-| 홈 화면 고친 것 반영 | 이 폴더에서 `git pull` 뒤 `install.ps1` (또는 Debian 설정만 `wsl -d Debian -u root -- bash ./setup.sh`). 돌아가는 화면은 `/opt/chiios` 의 사본이다 |
+| 새 판 받기 | 상태줄 '새 판 N개' 를 누르거나 터미널에서 `chii update`. 레포를 받아 `setup.sh` 를 다시 돌린다. 바로가기·자동 켜기 같은 Windows 쪽 파일이 바뀐 판이면 Windows 에서 `install.ps1` 도 다시 돌린다(창에 따로 알린다) |
+| 손으로 다시 깔기 | 이 폴더에서 `git pull` 뒤 `install.ps1` (또는 Debian 설정만 `wsl -d Debian -u root -- bash ./setup.sh`). 돌아가는 화면은 `/opt/chiios` 의 사본이다 |
 
 - WSL 은 Windows 재부팅이나 WSL 자동 업데이트(2026-11-10 3.0.1 -> 3.0.5 에서 겪음) 뒤에 Debian 을 다시 켜 주지 않는다. 그래서 `autostart.ps1` 이 작업 스케줄러에 `chiiOS` 작업을 걸어, 로그온할 때와 그 뒤 5분마다 Debian 을 깨운다. 관리자 권한은 필요 없다.
 - 작업은 로그온한 내 계정으로 돈다. WSL 배포판이 사용자별이라, Windows 에 로그온하기 전에는 켜지지 않는다. 재부팅 뒤에는 Parsec 등으로 들어가 로그온하면 된다.
 - 앱 창은 `msedge --app` 이다. Edge 는 창 크기를 기억하므로, 홈 화면이 처음 한 번만 창을 넉넉히 키우고 그 뒤로는 손대지 않는다. 바로가기는 `conhost --headless` 로 `start.cmd` 를 감싸 Debian 이 뜨는 동안 검은 창이 안 보인다.
+
+## chii 명령
+
+Debian 터미널(홈 화면 [터미널] 탭이나 `wsl -d Debian`)에서 홈 화면과 같은 일을 한다. 홈 화면 서버를 부르므로 니나브 깨우기 전 확인, 오늘 기록 같은 규칙이 단추와 같다. Tab 으로 할 말과 봇 이름을 채울 수 있다.
+
+| 명령 | 하는 일 |
+|---|---|
+| `chii` | 한눈에 보기: 봇, 오늘 할 일, 오늘 기록 마지막 5개 |
+| `chii bots` | 봇 목록 |
+| `chii wake 니나브` · `chii sleep 비서` · `chii bake loa-bot` | 깨우기(주의가 있으면 먼저 묻고, 터미널이 아니면 `-y` 없이는 멈춘다) · 재우기 · 다시 굽기(끝날 때까지 기다림) |
+| `chii logs 니나브 [-n 200] [-f]` | 봇 기록. `-f` 는 계속 따라 본다 |
+| `chii todo` · `chii todo add 내용` · `chii todo done 2` · `undo` · `rm` | 할 일 |
+| `chii log` | 오늘 기록 전부 |
+| `chii open` | 홈 화면을 Windows 앱 창으로 연다 |
+| `chii backup` | 지금 백업 |
+| `chii update [--check]` | 새 판 확인·받기 |
+
+봇은 이름(니나브)이나 project(loa-bot), 앞부분만 써도 된다.
+
+## 새 판 받기
+
+- 홈 화면 서버가 시작할 때와 30분마다 레포를 확인한다(`git fetch`). 깔린 판(`/opt/chiios/VERSION`)보다 레포가 앞서면 상태줄에 '새 판 N개' 가 뜬다.
+- 누르면 바뀐 커밋 목록을 보여 주고, 받으면 `chii-update` 가 root 로 레포를 앞으로만 감고(`pull --ff-only`) `setup.sh` 를 다시 돌린다. 진행은 창에 뜨고, 끝나면 화면이 저절로 새로 고쳐진다. 기록은 `/var/log/chiios-update.log`.
+- 받기는 Windows 쪽 `git.exe` 로 한다. 비공개 레포의 로그인 정보가 Windows 에 있고, Debian 의 git 으로 받으면 줄 끝 때문에 Windows git 이 파일을 전부 바뀐 걸로 본다.
+- 업데이트는 `systemd-run` 으로 따로 돌아서, `setup.sh` 가 홈 화면을 다시 켜도 끊기지 않는다. 레포에 손으로 고친 것이 있거나 갈라졌으면 덮지 않고 멈춘다.
+- `setup.sh` 만으로는 Windows 쪽(바로가기, 자동 켜기, `.wslconfig`)이 바뀌지 않는다. 그런 파일이 바뀐 판이면 창에 따로 알리니 Windows 에서 `install.ps1` 을 다시 돌린다.
 
 ## 비서
 
