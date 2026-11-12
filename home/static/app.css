@@ -427,3 +427,8 @@ dialog .btns:empty { display: none; }
 .brief-rows summary { cursor: pointer; }
 .brief-rows details ul { margin: 6px 0 2px; padding-left: 16px; color: var(--ink-2); font-size: 13px; }
 .msg .small { font-size: 12px; margin: 8px 0 0; }
+
+/* 새 판 알림: 있을 때만 상태줄에 뜬다. 목록이 길어도 대화 상자를 넘지 않게. */
+.seg.glass.upd { min-height: 34px; padding: 0 12px 0 10px; gap: 6px; font-size: 13px; }
+.upd-list { margin: 0 0 12px; padding-left: 18px; max-height: 40vh; overflow: auto; font-size: 13.5px; line-height: 1.75; }
+.upd-list .mono { margin-right: 6px; }

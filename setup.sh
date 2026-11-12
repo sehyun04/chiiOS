@@ -184,6 +184,20 @@ chii_summary() {
 }
 shopt -q login_shell && chii_summary
 unset -f chii_summary
+
+# chii 명령 빈칸 채우기: 첫 칸은 할 말, 둘째 칸은 봇 이름이나 할 일 동작.
+_chii() {
+  local cur=${COMP_WORDS[COMP_CWORD]}
+  if (( COMP_CWORD == 1 )); then
+    COMPREPLY=($(compgen -W "status bots wake sleep bake logs todo log open backup update help" -- "$cur"))
+  elif (( COMP_CWORD == 2 )); then
+    case ${COMP_WORDS[1]} in
+      wake|sleep|bake|logs) COMPREPLY=($(compgen -W "$(chii _names 2>/dev/null)" -- "$cur")) ;;
+      todo) COMPREPLY=($(compgen -W "add done undo rm" -- "$cur")) ;;
+    esac
+  fi
+}
+complete -F _chii chii
 EOF
 # 사용자 ~/.bashrc 가 PS1 을 다시 정하므로, 그 끝에서 위 파일을 불러야 덮어쓴다.
 bashrc_hook='[ -f /etc/chiios/bashrc ] && . /etc/chiios/bashrc'
@@ -192,6 +206,13 @@ if ! grep -qxF "$bashrc_hook" "$user_bashrc" 2>/dev/null; then
   printf '\n# chiiOS\n%s\n' "$bashrc_hook" >> "$user_bashrc"
   chown "$CHII_USER:$CHII_USER" "$user_bashrc"
 fi
+
+step "chii 명령"
+install -m 755 "$CHII_DIR/bin/chii" /usr/local/bin/chii
+# 업데이트 본체는 root 로 돈다(setup.sh 를 다시 돌린다). install 은 새 파일로 바꿔 넣으므로, 업데이트 도중
+# 이 setup.sh 가 자기를 부른 chii-update 를 바꿔 깔아도 돌던 쪽은 옛 파일을 끝까지 읽는다.
+install -m 755 "$CHII_DIR/bin/chii-update" /usr/local/sbin/chii-update
+install -d /var/lib/chiios
 
 step "되살리기 (새로 깐 Debian 이면)"
 # 백업은 Windows 쪽 레포 폴더에 쌓인다(bin/chii-backup). Debian 을 다시 깔아 할 일 파일이 없으면 마지막 백업을 편다.
@@ -276,7 +297,13 @@ docker compose --project-directory /opt/chiios/bots/assistant build -q
 # 깨어 있으면 새 판·새 설정으로 바꿔 띄우고, 처음이면 띄운다. 대장이 재워 둔 비서는 그대로 둔다.
 assist_id="$(docker ps -aq --filter label=com.docker.compose.project=assistant --filter label=com.docker.compose.project.working_dir)"
 if [ -z "$assist_id" ] || [ "$(docker inspect -f '{{.State.Running}}' "$assist_id")" = "true" ]; then
-  docker compose --project-directory /opt/chiios/bots/assistant up -d
+  # compose 는 설정이 같으면 이미지가 새로 구워져도 컨테이너를 그대로 둔다(봇 칸에 '새로 구운 판' 이 남았다).
+  # 이미지가 바뀌었을 때만 새로 띄운다. 매번 새로 띄우면 setup.sh 를 돌릴 때마다 비서가 재움·깨어남을 남긴다.
+  recreate=""
+  if [ -n "$assist_id" ] && [ "$(docker inspect -f '{{.Image}}' "$assist_id")" != "$(docker image inspect -f '{{.Id}}' chiios-assistant:latest)" ]; then
+    recreate="--force-recreate"
+  fi
+  docker compose --project-directory /opt/chiios/bots/assistant up -d $recreate
 fi
 
 step "백업 (매일 04:00 -> $backup_dir)"

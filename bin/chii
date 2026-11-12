@@ -1,0 +1,414 @@
+#!/usr/bin/env python3
+# chii: 터미널에서 홈 화면과 같은 일을 한다. 홈 화면 서버(127.0.0.1:7682) API 를 부르므로
+# 니나브 깨우기 전 확인, 오늘 기록 같은 규칙이 홈 화면 단추와 같다.
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime
+
+BASE = os.environ.get("CHII_HOME_URL", "http://127.0.0.1:7682")
+COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+DAYS = "월화수목금토일"
+
+HELP = """chii: 홈 화면과 같은 일을 터미널에서
+
+  chii                   한눈에 보기 (봇, 할 일, 오늘 기록)
+  chii bots              봇 목록
+  chii wake <봇>         깨우기 (니나브처럼 주의가 있으면 먼저 묻는다)
+  chii sleep <봇>        재우기
+  chii bake <봇>         다시 굽기 (끝날 때까지 기다린다, Ctrl+C 로 기다리기만 멈춤)
+  chii logs <봇> [-n 줄] [-f]
+                         봇 기록. -f 는 계속 따라 본다
+  chii todo              할 일 목록
+  chii todo add <내용>   할 일 더하기
+  chii todo done <번호>  끝낸 걸로 (undo 는 되돌리기, rm 은 지우기)
+  chii log               오늘 기록
+  chii open              홈 화면을 앱 창으로 연다 (Windows)
+  chii backup            지금 백업
+  chii update            새 판 받아서 다시 깔기
+
+<봇> 은 이름(니나브)이나 project(loa-bot), 앞부분만 써도 된다."""
+
+
+# 그리기 ----------------------------------------------------------------
+
+def paint(code, s):
+    return f"\033[{code}m{s}\033[0m" if COLOR else s
+
+
+def bold(s):
+    return paint("1", s)
+
+
+def dim(s):
+    return paint("90", s)
+
+
+def brand(s):
+    # 로그인 요약과 같은 코코아색
+    return paint("1;38;2;150;102;61", s)
+
+
+def width(s):
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in s)
+
+
+def pad(s, n):
+    return s + " " * max(0, n - width(s))
+
+
+def span(sec):
+    m = int(max(0, sec) // 60)
+    if m < 1:
+        return "방금"
+    if m < 60:
+        return f"{m}분"
+    if m < 1440:
+        return f"{m // 60}시간"
+    return f"{m // 1440}일"
+
+
+def status(b):
+    if b["state"] == "running":
+        return "일하는 중", "32"
+    if b["state"] == "restarting":
+        return "다시 일어나는 중", "33"
+    if b["state"] == "created":
+        return "아직 안 깨움", "90"
+    if b["exitCode"] in (0, 137, 143):
+        return "쉬는 중", "90"
+    return "쓰러짐", "31"
+
+
+def die(msg, code=1):
+    print(paint("31", msg), file=sys.stderr)
+    sys.exit(code)
+
+
+# 홈 화면 API -------------------------------------------------------------
+
+def call(method, path, body=None, timeout=200):
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(BASE + path, data=data, method=method,
+                                 headers={"X-Chii": "1", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except ValueError:
+            return e.code, {}
+    except (urllib.error.URLError, OSError):
+        die("홈 화면 서버에 닿지 않아. systemctl status chii-home 로 본다.")
+
+
+def state():
+    code, data = call("GET", "/api/state")
+    if code != 200:
+        die(f"홈 화면이 상태를 못 줬어 ({code})")
+    return data
+
+
+def find(bots, word):
+    if bots is None:
+        die("Docker 에 닿지 않아 봇을 모른다.")
+    w = word.lower()
+    exact = [b for b in bots if w in (b["name"].lower(), b["project"].lower())]
+    if exact:
+        return exact[0]
+    near = [b for b in bots if b["name"].lower().startswith(w) or b["project"].lower().startswith(w)]
+    if len(near) == 1:
+        return near[0]
+    names = ", ".join(f"{b['name']}({b['project']})" for b in bots)
+    die(f"'{word}' 에 맞는 봇이 {'여럿' if near else '없어'}. 있는 봇: {names}")
+
+
+# 명령 --------------------------------------------------------------------
+
+def show_bots(bots, indent="  "):
+    if bots is None:
+        print(indent + paint("31", "Docker 에 닿지 않아 봇을 모른다"))
+        return
+    if not bots:
+        print(indent + dim("올린 봇이 없다"))
+        return
+    nw = max(width(b["name"]) for b in bots)
+    sw = max(width(status(b)[0]) for b in bots)
+    now = time.time()
+    for b in bots:
+        word, color = status(b)
+        extra = [b["project"]]
+        if b["state"] == "running" and b.get("startedAt"):
+            extra.append(f"일한 지 {span(now - b['startedAt'])}")
+        elif b.get("finishedAt"):
+            extra.append(f"쉰 지 {span(now - b['finishedAt'])}")
+        if b.get("commit"):
+            extra.append(b["commit"])
+        if b.get("baking"):
+            extra.append("굽는 중")
+        if b.get("stale"):
+            extra.append("새로 구운 판 있음")
+        print(f"{indent}{bold(pad(b['name'], nw))}  {paint(color, pad(word, sw))}  {dim(' · '.join(extra))}")
+
+
+def show_todos(todos, indent="  "):
+    if not todos:
+        print(indent + dim("할 일이 없다. chii todo add <내용> 으로 더한다"))
+        return
+    for i, t in enumerate(todos, 1):
+        mark = paint("34", "●") if t["done"] else "○"
+        text = dim(t["text"]) if t["done"] else t["text"]
+        print(f"{indent}{dim(str(i).rjust(2))}  {mark}  {text}")
+
+
+def show_events(events, indent="  ", last=None):
+    evs = events[-last:] if last else events
+    if not evs:
+        print(indent + dim("오늘은 아직 아무 일도 없다"))
+        return
+    for e in evs:
+        color = {"crash": "31", "bakefail": "31", "down": "31", "boot": "32", "start": "32"}.get(e.get("kind"), "0")
+        print(f"{indent}{dim(datetime.fromtimestamp(e['t']).strftime('%H:%M'))}  {paint(color, e['text'])}")
+
+
+def cmd_status(_args):
+    st = state()
+    s = st["sys"]
+    gib = 2 ** 30
+    print()
+    print(f"  {brand('chiiOS')} · {s['os']} · {span(s['uptime'])}째 깨어 있음 · "
+          + dim(f"메모리 {s['memUsed'] / gib:.1f} / {s['memTotal'] / gib:.1f} GB · 디스크 {s['diskUsed'] / gib:.1f} GB 씀"))
+    print()
+    print("  " + bold("봇"))
+    show_bots(st["bots"], "    ")
+    print()
+    done = sum(1 for t in st["todos"] if t["done"])
+    print("  " + bold("오늘 할 일") + "  " + dim(f"{done} / {len(st['todos'])}"))
+    show_todos(st["todos"], "    ")
+    print()
+    print("  " + bold("오늘 기록") + ("  " + dim(f"마지막 5개 · 전부는 chii log") if len(st["events"]) > 5 else ""))
+    show_events(st["events"], "    ", last=5)
+    print()
+
+
+def cmd_bots(_args):
+    show_bots(state()["bots"])
+
+
+def cmd_act(act, args):
+    if not args:
+        die(f"어느 봇? chii {act_word(act)} <봇>")
+    yes = "-y" in args or "--yes" in args
+    word = next(a for a in args if not a.startswith("-")) if any(not a.startswith("-") for a in args) else ""
+    bot = find(state()["bots"], word)
+    path = f"/api/bots/{urllib.parse.quote(bot['project'])}/{act}"
+    code, data = call("POST", path)
+    if code == 409 and data.get("guard"):
+        print(paint("33", "  주의: ") + data["guard"])
+        if not yes:
+            if not sys.stdin.isatty():
+                die("확인이 필요해서 멈췄어. 정말 깨우려면 -y 를 붙인다.")
+            try:
+                answer = input(f"  {bot['name']} 깨울까? (재웠으면 y) [y/N] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                die("그만뒀어.")
+            if answer not in ("y", "yes", "ㅛ"):
+                die("그만뒀어.")
+        code, data = call("POST", path, {"confirm": True})
+    if code == 404:
+        die(f"{bot['name']} 을(를) 못 찾았어.")
+    if code != 200:
+        die(f"{bot['name']} {act_word(act)} 실패: {data.get('error', code)}. chii logs {bot['project']} 로 본다.")
+    if act == "bake":
+        return wait_bake(bot)
+    print(f"  {bold(bot['name'])} {'깨웠어' if act == 'start' else '재웠어'}")
+
+
+def act_word(act):
+    return {"start": "wake", "stop": "sleep", "bake": "bake"}[act]
+
+
+def wait_bake(bot):
+    # 굽기는 홈 화면이 뒤에서 돌린다. 끝났는지는 봇 상태의 baking 과 오늘 기록으로 안다.
+    started = time.time()
+    print(f"  {bold(bot['name'])} 굽는 중", end="", flush=True)
+    try:
+        while True:
+            time.sleep(2)
+            st = state()
+            b = next((x for x in st["bots"] or [] if x["project"] == bot["project"]), None)
+            if not b or not b.get("baking"):
+                break
+            print(".", end="", flush=True)
+    except KeyboardInterrupt:
+        print()
+        print(dim("  기다리기만 멈췄어. 굽기는 계속된다. 끝나면 chii log 에 남는다."))
+        return
+    print()
+    evs = [e for e in st["events"] if e.get("bot") == bot["project"] and e["t"] >= started - 5
+           and e.get("kind") in ("bake", "bakefail")]
+    if evs and evs[-1]["kind"] == "bakefail":
+        die("  " + evs[-1]["text"])
+    print(f"  다 구웠어 ({span(time.time() - started)}). 깨어 있었다면 재우고 다시 깨워야 새 판이 올라간다.")
+
+
+def cmd_logs(args):
+    n = 100
+    follow = "-f" in args
+    words = []
+    it = iter(args)
+    for a in it:
+        if a == "-n":
+            v = next(it, "")
+            if not v.isdigit():
+                die("-n 뒤에는 줄 수")
+            n = int(v)
+        elif a != "-f":
+            words.append(a)
+    if not words:
+        die("어느 봇? chii logs <봇>")
+    bot = find(state()["bots"], words[0])
+    if follow:
+        # 따라 보기는 docker 에 바로 붙는다(홈 화면 API 는 한 번에 끊어서 준다). chiiOS 사용자는 docker 그룹이다.
+        os.execvp("docker", ["docker", "logs", "-f", "--tail", str(n), bot["container"]])
+    code, data = call("GET", f"/api/bots/{urllib.parse.quote(bot['project'])}/logs?tail={n}")
+    if code != 200:
+        die(f"기록을 못 읽었어 ({data.get('error', code)})")
+    sys.stdout.write(data.get("text", ""))
+
+
+def cmd_todo(args):
+    sub = args[0] if args else ""
+    if sub in ("", "ls", "list"):
+        show_todos(state()["todos"])
+        return
+    if sub == "add":
+        text = " ".join(args[1:]).strip()
+        if not text:
+            die("무엇을? chii todo add <내용>")
+        code, data = call("POST", "/api/todos", {"text": text})
+        if code != 200:
+            die(f"못 더했어 ({data.get('error', code)})")
+        print(f"  더했어: {data['item']['text']}")
+        return
+    if sub in ("done", "undo", "rm"):
+        if len(args) < 2 or not args[1].isdigit():
+            die(f"몇 번? chii todo {sub} <번호>  (번호는 chii todo 에 나온다)")
+        todos = state()["todos"]
+        i = int(args[1])
+        if not 1 <= i <= len(todos):
+            die(f"{i}번 할 일이 없어. 1~{len(todos)}")
+        t = todos[i - 1]
+        if sub == "rm":
+            code, data = call("POST", f"/api/todos/{t['id']}/delete")
+            word = "지웠어"
+        else:
+            code, data = call("POST", f"/api/todos/{t['id']}/set", {"done": sub == "done"})
+            word = "끝낸 걸로 바꿨어" if sub == "done" else "안 한 걸로 되돌렸어"
+        if code != 200:
+            die(f"실패 ({data.get('error', code)})")
+        print(f"  {word}: {t['text']}")
+        return
+    die(f"모르는 말: chii todo {sub}. add, done, undo, rm 중 하나")
+
+
+def cmd_log(_args):
+    show_events(state()["events"])
+
+
+def cmd_open(_args):
+    # Debian 안에서 Windows 의 Edge 앱 창을 띄운다. WSL 이 아니면 주소만 알려 준다.
+    cmd = "/mnt/c/Windows/System32/cmd.exe"
+    if os.path.exists(cmd):
+        subprocess.Popen([cmd, "/c", "start", "", "msedge", f"--app={BASE.replace('127.0.0.1', 'localhost')}/"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd="/mnt/c")
+        print("  홈 화면을 열었어")
+    else:
+        print(f"  브라우저에서 {BASE.replace('127.0.0.1', 'localhost')}/ 를 연다")
+
+
+def cmd_backup(_args):
+    exe = shutil.which("chii-backup")
+    if not exe:
+        die("chii-backup 이 없어. setup.sh 를 다시 돌린다.")
+    os.execv(exe, [exe])
+
+
+def cmd_update(args):
+    code, data = call("GET", "/api/update")
+    if code != 200 or not data.get("enabled"):
+        die(data.get("reason") or "업데이트를 볼 수 없어(Windows 쪽 git 이 필요하다).")
+    if "--check" not in args:
+        call("POST", "/api/update/check", timeout=60)
+        code, data = call("GET", "/api/update")
+    if not data.get("commits"):
+        print("  이미 새 판이야" + dim(f" ({data.get('deployed', '')[:7]})"))
+        return
+    print(f"  새 판 {len(data['commits'])}개:")
+    for c in data["commits"][:15]:
+        print(f"    {dim(c['sha'])}  {c['subject']}")
+    if data.get("windows"):
+        print(paint("33", "  Windows 쪽 파일도 바뀌었어: ") + ", ".join(data["windows"]))
+        print(dim("  그건 Windows 에서 install.ps1 을 다시 돌려야 반영된다."))
+    if "--check" in args:
+        return
+    if sys.stdin.isatty():
+        try:
+            if input("  받아서 다시 깔까? [y/N] ").strip().lower() not in ("y", "yes", "ㅛ"):
+                die("그만뒀어.")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            die("그만뒀어.")
+    code, data = call("POST", "/api/update")
+    if code != 200:
+        die(f"시작 못 했어: {data.get('error', code)}")
+    print(dim("  받는 중이고 다시 까는 중이야. 홈 화면 서버가 잠깐 내려갔다 올라온다."))
+    print(dim("  끝나면 /var/log/chiios-update.log 에 남는다."))
+
+
+def cmd_names(_args):
+    # 빈칸 채우기(bash completion)용. 이름과 project 를 한 줄에 하나씩.
+    try:
+        st = state()
+    except SystemExit:
+        return
+    for b in st.get("bots") or []:
+        print(b["name"])
+        print(b["project"])
+
+
+COMMANDS = {
+    "status": cmd_status, "bots": cmd_bots, "logs": cmd_logs, "todo": cmd_todo, "log": cmd_log,
+    "open": cmd_open, "backup": cmd_backup, "update": cmd_update, "_names": cmd_names,
+    "wake": lambda a: cmd_act("start", a), "sleep": lambda a: cmd_act("stop", a), "bake": lambda a: cmd_act("bake", a),
+}
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        return cmd_status(args)
+    if args[0] in ("help", "-h", "--help"):
+        print(HELP)
+        return None
+    fn = COMMANDS.get(args[0])
+    if not fn:
+        die(f"모르는 말: {args[0]}. chii help 로 본다.")
+    return fn(args[1:])
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print()
+        sys.exit(130)

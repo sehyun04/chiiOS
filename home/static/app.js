@@ -120,6 +120,78 @@ function renderEvents(events) {
   if (grew) box.scrollTop = box.scrollHeight;
 }
 
+// 새 판 알림. 홈 화면 서버가 30분마다 레포를 확인해 두고, 여기서는 그 결과만 본다.
+function renderUpdate(u) {
+  const btn = $("#upd");
+  const running = u && u.state === "running";
+  btn.hidden = !(u && u.enabled && (u.count > 0 || running));
+  if (btn.hidden) return;
+  $("#upd-label").textContent = running ? "다시 까는 중" : `새 판 ${u.count}개`;
+  btn.title = running ? "업데이트하는 중" : "레포에 새 커밋이 있다. 눌러서 받아 다시 깐다";
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function openUpdate() {
+  let u;
+  try {
+    u = await (await fetch("/api/update", { cache: "no-store" })).json();
+  } catch {
+    return;
+  }
+  if (u.progress && u.progress.state === "running") return followUpdate(0);
+  if (!u.commits.length) {
+    dialog("업데이트", "<p>이미 새 판이다.</p>");
+    return;
+  }
+  const list = u.commits.map((c) => `<li><span class="mono dim">${esc(c.sha)}</span> ${esc(c.subject)}</li>`).join("");
+  const win = u.windows.length
+    ? `<div class="note">${ICON.warn}<span>Windows 쪽 파일도 바뀌었다(${esc(u.windows.join(", "))}). 그건 Windows 에서 install.ps1 을 다시 돌려야 반영된다.</span></div>`
+    : "";
+  dialog(`새 판 ${u.commits.length}개`,
+    `<ul class="upd-list">${list}</ul>${win}<p class="dim">레포를 받은 뒤 setup.sh 를 다시 돌린다. 홈 화면과 터미널이 잠깐 끊겼다 돌아오고, 깨어 있는 봇은 그대로 둔다.</p>`,
+    [
+      { label: "나중에" },
+      {
+        label: "받아서 다시 깔기", primary: true, run: async () => {
+          const startedAt = Date.now() / 1000;
+          const r = await post("/api/update");
+          if (r.status !== 200) return dialog("업데이트", `<p>${esc(r.data.error || "시작하지 못했다.")}</p>`);
+          followUpdate(startedAt);
+        },
+      },
+    ]);
+}
+
+// 진행을 따라간다. 도중에 홈 화면 서버가 다시 켜져 잠깐 닿지 않는 건 정상이다.
+async function followUpdate(startedAt) {
+  dialog("업데이트하는 중", '<p id="upd-msg">받는 중</p><p class="dim">창을 닫아도 업데이트는 계속된다.</p>');
+  const say = (t) => { const el = $("#upd-msg"); if (el) el.textContent = t; };
+  for (let i = 0; i < 450; i++) {
+    await sleep(2000);
+    let p;
+    try {
+      p = (await (await fetch("/api/update", { cache: "no-store" })).json()).progress || {};
+    } catch {
+      say("홈 화면이 다시 켜지는 중");
+      continue;
+    }
+    // 지난번 결과(ok)가 남아 있을 수 있어, 이번에 시작한 뒤 적힌 것만 믿는다.
+    if ((p.t || 0) < startedAt - 1) continue;
+    if (p.state === "running") say(p.msg || "하는 중");
+    else if (p.state === "ok") {
+      say("끝났어. 화면을 새로 고칠게");
+      await sleep(1200);
+      location.reload();
+      return;
+    } else if (p.state === "fail") {
+      dialog("업데이트가 멈췄다", `<p>${esc(p.msg || "")}</p>${p.tail ? `<pre>${esc(p.tail)}</pre>` : ""}`);
+      refresh();
+      return;
+    }
+  }
+}
+
 function renderBar(s) {
   const sys = s.sys;
   $("#who").textContent = `${sys.user}@${sys.host}:~`;
@@ -201,6 +273,7 @@ async function refresh() {
   renderTodos(state.todos);
   renderEvents(state.events);
   renderBar(state);
+  renderUpdate(state.update);
 }
 
 // 대화 상자: 제목·본문·단추를 받아 띄운다.
@@ -288,6 +361,8 @@ document.addEventListener("keydown", (e) => {
   else if (n === "3") $("#todo-input").focus();
   else pane.querySelector("button")?.focus();
 });
+
+$("#upd").addEventListener("click", openUpdate);
 
 // 상태줄 하치와레 말풍선은 비서로 들어가는 문이다.
 $("#bubble").addEventListener("click", () => {

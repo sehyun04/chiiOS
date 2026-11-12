@@ -46,6 +46,18 @@ TYPES = {
 # 글꼴과 xterm 은 3MB 가 넘고 판이 고정이라 매번 새로 받을 까닭이 없다. 나머지는 고치면 바로 보이게 캐시하지 않는다.
 CACHED = ("fonts/", "vendor/")
 
+# 업데이트 알림. 레포 받기(fetch)는 Windows 쪽 git.exe 로 한다: 비공개 레포의 로그인 정보가 Windows 에 있다.
+CONF = Path("/etc/chiios/chiios.conf")
+VERSION = HERE.parent / "VERSION"
+GIT_EXE = Path("/mnt/c/Program Files/Git/cmd/git.exe")
+UPDATE_STATE = Path("/var/lib/chiios/update.json")
+UPDATE_LOG = Path("/var/log/chiios-update.log")
+CHECK_EVERY = 30 * 60
+# 이 파일이 바뀐 판은 Debian 쪽 setup.sh 만으로는 반영되지 않는다(바로가기·자동 켜기·.wslconfig).
+WINDOWS_SIDE = ("install.ps1", "autostart.ps1", "shortcut.ps1", "start.cmd", "wslconfig", "chiios.ico")
+update = {"enabled": False, "reason": "아직 확인 전", "commits": [], "windows": [], "checkedAt": 0, "fetched": False}
+update_lock = threading.Lock()
+
 
 def pipe(src, dst):
     try:
@@ -354,6 +366,107 @@ def watch_docker():
         time.sleep(5)
 
 
+def read_conf():
+    out = {}
+    try:
+        for line in CONF.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return out
+
+
+def wingit(winrepo, *args, timeout=60):
+    try:
+        p = subprocess.run([str(GIT_EXE), "-C", winrepo, *args], capture_output=True, timeout=timeout)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, ""
+
+
+def check_update(fetch=True):
+    """새 판이 있는지 본다. 결과는 update 에 담아 두고 /api/state 는 이걸 읽기만 한다(요청마다 git 을 돌리지 않게)."""
+    with update_lock:
+        repo = read_conf().get("CHII_REPO", "")
+        if not repo or not GIT_EXE.exists():
+            update.update(enabled=False, reason="Windows 쪽 git 이 없어 새 판을 볼 수 없다", commits=[], windows=[])
+            return dict(update)
+        try:
+            winrepo = subprocess.run(["wslpath", "-w", repo], capture_output=True, text=True, timeout=5).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            winrepo = ""
+        if not winrepo:
+            update.update(enabled=False, reason="레포 자리를 Windows 경로로 못 바꿨다", commits=[], windows=[])
+            return dict(update)
+        fetched = update["fetched"]
+        if fetch:
+            code, _ = wingit(winrepo, "fetch", "--quiet")
+            fetched = code == 0
+        try:
+            deployed = VERSION.read_text().strip()
+        except OSError:
+            deployed = ""
+        code, upstream = wingit(winrepo, "rev-parse", "@{u}", timeout=15)
+        upstream = upstream.strip()
+        commits, windows = [], []
+        if code == 0 and upstream and deployed and deployed != upstream:
+            code, log = wingit(winrepo, "log", "--format=%h%x09%s", f"{deployed}..{upstream}", timeout=15)
+            for line in log.splitlines():
+                if "\t" in line:
+                    sha, subject = line.split("\t", 1)
+                    commits.append({"sha": sha, "subject": subject})
+            code, names = wingit(winrepo, "diff", "--name-only", f"{deployed}..{upstream}", timeout=15)
+            windows = sorted({n for n in names.split() if n in WINDOWS_SIDE})
+        update.update(enabled=True, reason="", deployed=deployed, upstream=upstream, commits=commits,
+                      windows=windows, checkedAt=time.time(), fetched=fetched)
+        return dict(update)
+
+
+def update_progress():
+    try:
+        st = json.loads(UPDATE_STATE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    # 업데이트 도중 PC 가 꺼지면 '하는 중' 이 영영 남는다. setup.sh 가 30분을 넘길 일은 없으니 멈춘 걸로 본다.
+    if st.get("state") == "running" and time.time() - st.get("t", 0) > 1800:
+        st = {**st, "state": "fail", "msg": "업데이트가 중간에 멈춘 것 같다. 다시 해 본다"}
+    tail = ""
+    if st.get("state") == "fail":
+        try:
+            tail = "\n".join(UPDATE_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-15:])
+        except OSError:
+            pass
+    return {**st, "tail": tail}
+
+
+def watch_update():
+    # 시작하자마자 한 번, 그 뒤로 30분마다. 데스크톱을 Parsec 으로 열었을 때 새 판이 바로 보이게.
+    while True:
+        try:
+            check_update()
+        except Exception:  # 확인이 한 번 실패해도 다음 확인은 해야 한다.
+            pass
+        time.sleep(CHECK_EVERY)
+
+
+def start_update():
+    # root 로 돌아야 setup.sh 를 다시 돌릴 수 있다. WSL 의 chiiOS 사용자는 sudo 비밀번호가 없다(setup.sh).
+    # systemd-run 으로 띄워 따로 된 작업으로 만든다: setup.sh 가 이 서버를 다시 켜도 업데이트는 이어 간다.
+    try:
+        p = subprocess.run(["sudo", "-n", "systemd-run", "--unit=chii-update", "--collect", "--quiet",
+                            "/usr/local/sbin/chii-update"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, str(e)
+    if p.returncode != 0:
+        err = (p.stderr or p.stdout).strip()
+        if "already" in err or "exists" in err:
+            return False, "이미 업데이트하는 중이다"
+        return False, err[:200] or "sudo 가 막혔다. 터미널에서 sudo chii-update"
+    return True, None
+
+
 def bake(bot):
     project = bot["project"]
     if project in baking:
@@ -419,6 +532,8 @@ class Handler(BaseHTTPRequestHandler):
                 "todos": visible_todos(),
                 "events": events(),
                 "termPort": TERM_PORT,
+                "update": {"enabled": update["enabled"], "count": len(update["commits"]),
+                           "state": update_progress().get("state", "")},
             })
         m = re.fullmatch(r"/api/bots/([\w.-]+)/logs", u.path)
         if m:
@@ -429,6 +544,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"name": bot["name"], "text": bot_logs(bot, tail if tail.isdigit() else 200)})
         if u.path == "/api/assistant":
             return self.assistant("GET", "/status")
+        if u.path == "/api/update":
+            return self.send_json({**update, "progress": update_progress()})
         return self.static(u.path)
 
     def static(self, path):
@@ -514,6 +631,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "그런 할 일이 없다"}, 404)
             return self.send_json({"ok": True, "item": item})
 
+        if u.path == "/api/update/check":
+            return self.send_json(check_update())
+        if u.path == "/api/update":
+            ok, err = start_update()
+            return self.send_json({"ok": True} if ok else {"error": err}, 200 if ok else 409)
+
         if u.path in ("/api/assistant/key", "/api/assistant/clear", "/api/assistant/chat", "/api/assistant/brief"):
             return self.assistant("POST", "/" + u.path.rsplit("/", 1)[1], data, stream=u.path.endswith("/chat"))
 
@@ -559,6 +682,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     threading.Thread(target=watch_docker, daemon=True).start()
+    threading.Thread(target=watch_update, daemon=True).start()
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
 

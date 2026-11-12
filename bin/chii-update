@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# chiiOS 업데이트: 레포를 받아 setup.sh 를 다시 돌린다. 홈 화면 [새 판] 단추와 chii update 가 root 로 부른다.
+# 받기는 Windows 쪽 git.exe 로 한다. 비공개 레포의 로그인 정보(Git Credential Manager)가 Windows 에 있고,
+# 그 레포의 줄 끝·파일 정보도 Windows git 이 관리한다. Debian 의 git 으로 받으면 Windows git 이 파일을 전부 바뀐 걸로 본다.
+# 홈 화면 서버가 이걸 systemd-run 으로 띄우므로, setup.sh 가 홈 화면을 다시 켜도 이 작업은 끊기지 않는다.
+set -uo pipefail
+
+state=/var/lib/chiios/update.json
+log=/var/log/chiios-update.log
+# shellcheck disable=SC1091
+. /etc/chiios/chiios.conf
+
+note() {
+  # 홈 화면이 읽는 진행 상태. msg 에 따옴표가 들어가지 않게 쓴다.
+  printf '{"state": "%s", "t": %s, "msg": "%s"}\n' "$1" "$(date +%s)" "$2" > "$state.tmp"
+  chmod 644 "$state.tmp"
+  mv -f "$state.tmp" "$state"
+}
+
+gitexe="/mnt/c/Program Files/Git/cmd/git.exe"
+if [ ! -x "$gitexe" ] || [ -z "${CHII_REPO:-}" ]; then
+  note fail "Windows 쪽 git 이나 레포 자리를 모른다"
+  exit 1
+fi
+winrepo="$(wslpath -w "$CHII_REPO")"
+
+note running "받는 중"
+echo "== $(date '+%F %T') 업데이트 시작 ($CHII_REPO)" >> "$log"
+# 앞으로만 감기(fast-forward). 레포에 손으로 고친 것이 있거나 갈라졌으면 덮지 않고 멈춘다.
+if ! "$gitexe" -C "$winrepo" pull --ff-only >> "$log" 2>&1; then
+  echo "!! 받기 실패" >> "$log"
+  note fail "받기 실패: 레포에 커밋 안 한 변경이 있거나 갈라졌다. Windows 쪽에서 git status 로 본다"
+  exit 1
+fi
+
+note running "다시 까는 중"
+if ! bash "$CHII_REPO/setup.sh" >> "$log" 2>&1; then
+  note fail "setup.sh 가 중간에 멈췄다. /var/log/chiios-update.log 를 본다"
+  exit 1
+fi
+echo "== $(date '+%F %T') 업데이트 끝" >> "$log"
+note ok "끝"
