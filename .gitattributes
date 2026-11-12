@@ -3,3 +3,7 @@
 *.sh text eol=lf
 # install.ps1 이 ~/.wslconfig 와 해시로 비교하므로 줄 끝이 바뀌면 안 된다.
 wslconfig text eol=lf
+# Windows 쪽 clone 에서 CRLF 로 바뀌면 Debian 의 docker build 가 그 파일을 그대로 읽는다. 셸과 같은 이유로 LF 고정.
+Dockerfile text eol=lf
+requirements.txt text eol=lf
+compose.yaml text eol=lf
