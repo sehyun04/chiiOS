@@ -79,6 +79,30 @@ apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin
 # docker 그룹은 사실상 root 권한이다. 혼자 쓰는 기계라 매번 sudo 를 붙이는 수고를 덜기로 했다.
 usermod -aG docker "$CHII_USER"
 systemctl enable --now docker
+# 봇 기록(docker logs)은 기본값이면 끝없이 쌓인다. 몇 달 켜 두는 데스크톱에서 디스크를 다 먹지 않게, 따로 정하지
+# 않은 봇은 컨테이너마다 10MB 파일 3개까지만 남긴다. 이미 있는 설정은 지우지 않고 합친다.
+# 바뀌었을 때만 docker 를 다시 켠다(그 순간 깨어 있던 봇이 잠깐 내려갔다 restart 정책대로 다시 뜬다).
+# 이미 만들어진 컨테이너는 옛 설정 그대로고, 다시 만들어질 때(새 판으로 깨우기 등) 새 기본값을 받는다.
+log_changed="$(python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path("/etc/docker/daemon.json")
+raw = p.read_text() if p.exists() else ""
+cfg = json.loads(raw) if raw.strip() else {}
+before = json.dumps(cfg, sort_keys=True)
+if cfg.get("log-driver", "json-file") == "json-file":
+    cfg["log-driver"] = "json-file"
+    opts = cfg.setdefault("log-opts", {})
+    opts.setdefault("max-size", "10m")
+    opts.setdefault("max-file", "3")
+if json.dumps(cfg, sort_keys=True) != before:
+    p.write_text(json.dumps(cfg, indent=2) + "\n")
+    print("changed")
+PY
+)"
+if [ "$log_changed" = "changed" ]; then
+  systemctl restart docker
+  echo "docker 기록 상한을 걸고 docker 를 다시 켰다."
+fi
 
 step "브라우저 터미널 (ttyd $TTYD_VERSION, 포트 $TTYD_PORT)"
 # Debian 13 저장소에는 ttyd 가 없어서 공식 릴리스의 정적 바이너리를 받는다.
@@ -149,7 +173,7 @@ chii_summary() {
   disk=$(df -h --output=used / | tail -n 1 | tr -d ' ')
   # 봇은 compose 로 띄운 컨테이너다. docker 가 늦게 답해도 로그인이 붙잡히지 않게 2초에서 끊는다.
   bots=""
-  if states=$(timeout 2 docker ps -a --filter label=com.docker.compose.project --format '{{.State}}' 2>/dev/null); then
+  if states=$(timeout 2 docker ps -a --filter label=com.docker.compose.project.working_dir --format '{{.State}}' 2>/dev/null); then
     all=$(grep -c . <<<"$states")
     run=$(grep -c '^running$' <<<"$states")
     bots="봇 ${all}개 (일하는 중 ${run} · 쉬는 중 $(( all - run ))) · "
@@ -169,12 +193,33 @@ if ! grep -qxF "$bashrc_hook" "$user_bashrc" 2>/dev/null; then
   chown "$CHII_USER:$CHII_USER" "$user_bashrc"
 fi
 
+step "되살리기 (새로 깐 Debian 이면)"
+# 백업은 Windows 쪽 레포 폴더에 쌓인다(bin/chii-backup). Debian 을 다시 깔아 할 일 파일이 없으면 마지막 백업을 편다.
+# 데이터가 이미 있으면 손대지 않는다: 돌아가던 chiiOS 의 오늘 기록을 어제 백업으로 덮으면 안 된다.
+backup_dir="$CHII_DIR/backup"
+latest="$(ls -1t "$backup_dir"/chiios-*.tar.gz 2>/dev/null | head -n 1 || true)"
+if [ -n "$latest" ] && [ ! -e "/home/$CHII_USER/.local/share/chiios/todos.json" ]; then
+  rtmp="$(mktemp -d)"
+  tar -xzf "$latest" -C "$rtmp"
+  install -d -o "$CHII_USER" -g "$CHII_USER" "/home/$CHII_USER/.local/share/chiios" /var/lib/chiios
+  install -d -m 700 -o "$CHII_USER" -g "$CHII_USER" /var/lib/chiios/assistant
+  cp -a "$rtmp/home/." "/home/$CHII_USER/.local/share/chiios/"
+  cp -a "$rtmp/assistant/." /var/lib/chiios/assistant/
+  chown -R "$CHII_USER:$CHII_USER" "/home/$CHII_USER/.local/share/chiios" /var/lib/chiios/assistant
+  rm -rf "$rtmp"
+  echo "백업에서 되살렸다: $latest (비서 열쇠는 백업에 없으니 다시 넣는다)"
+else
+  echo "되살릴 것 없음"
+fi
+
 step "홈 화면 (포트 $HOME_PORT)"
 # Windows 쪽 폴더(/mnt/c)에서 바로 돌리지 않고 Debian 안으로 복사해 둔다. 레포를 옮기거나 지워도
 # 홈 화면이 살아 있어야 하고, 무엇이 돌고 있는지는 마지막으로 돌린 setup.sh 가 정한다.
 install -d /opt/chiios
 rm -rf /opt/chiios/home /opt/chiios/bots
 cp -r "$CHII_DIR/home" "$CHII_DIR/bots" /opt/chiios/
+# 지금 깔린 판. 홈 화면의 업데이트 알림이 레포의 새 커밋과 비교하는 기준이다.
+git -c safe.directory='*' -C "$CHII_DIR" rev-parse HEAD > /opt/chiios/VERSION 2>/dev/null || echo unknown > /opt/chiios/VERSION
 cat > /etc/systemd/system/chii-home.service <<EOF
 [Unit]
 Description=chiiOS home screen
@@ -222,7 +267,7 @@ fi
 if [ -z "$CHII_GITHUB" ]; then
   CHII_GITHUB="$(git -c safe.directory='*' -C "$CHII_DIR" remote get-url origin 2>/dev/null | sed -nE 's#.*github\.com[:/]+([^/]+)/.*#\1#p')"
 fi
-printf 'CHII_WORK=%s\nCHII_GITHUB=%s\n' "$CHII_WORK" "$CHII_GITHUB" > "$conf"
+printf 'CHII_WORK=%s\nCHII_GITHUB=%s\nCHII_REPO=%s\nCHII_BACKUP=%s\n' "$CHII_WORK" "$CHII_GITHUB" "$CHII_DIR" "$backup_dir" > "$conf"
 cp "$conf" /opt/chiios/bots/assistant/.env
 echo "작업 폴더: ${CHII_WORK:-(없음, GitHub 만)} · GitHub: ${CHII_GITHUB:-(없음)}"
 
@@ -233,6 +278,32 @@ assist_id="$(docker ps -aq --filter label=com.docker.compose.project=assistant -
 if [ -z "$assist_id" ] || [ "$(docker inspect -f '{{.State.Running}}' "$assist_id")" = "true" ]; then
   docker compose --project-directory /opt/chiios/bots/assistant up -d
 fi
+
+step "백업 (매일 04:00 -> $backup_dir)"
+install -m 755 "$CHII_DIR/bin/chii-backup" /usr/local/bin/chii-backup
+cat > /etc/systemd/system/chii-backup.service <<EOF
+[Unit]
+Description=chiiOS backup
+
+[Service]
+Type=oneshot
+User=$CHII_USER
+ExecStart=/usr/local/bin/chii-backup
+EOF
+# Persistent: 04:00 에 PC 가 꺼져 있었으면 켜진 뒤 바로 한다. 노트북은 새벽에 대개 꺼져 있다.
+cat > /etc/systemd/system/chii-backup.timer <<EOF
+[Unit]
+Description=chiiOS daily backup
+
+[Timer]
+OnCalendar=*-*-* 04:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now chii-backup.timer >/dev/null
 
 step "확인"
 docker --version

@@ -92,6 +92,16 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 - 절전 모드는 "안 함". 절전에 들어가면 봇도 멈추고 Parsec 도 붙지 못한다. 화면 끄기는 괜찮다.
 - WSL2 는 Windows 가상화 기능을 켠다. 일부 게임 안티치트가 이것과 부딪히므로, 설치 뒤 하는 게임을 한 번씩 켜 본다.
+- 봇 기록(`docker logs`)은 따로 정하지 않은 봇도 컨테이너마다 10MB 파일 3개까지만 남는다(`/etc/docker/daemon.json`, `setup.sh` 가 건다). 몇 달 켜 둬도 디스크를 다 먹지 않게.
+
+## 백업
+
+할 일, 오늘 기록, 비서 대화는 WSL 디스크 안에만 있어서 Debian 을 다시 깔면 사라진다. 그래서 매일 Windows 쪽에 묶어 둔다.
+
+- 매일 04:00 에 레포 폴더 `backup/chiios-날짜.tar.gz` 로 쌓인다(그 시각에 꺼져 있었으면 켜진 뒤 바로). 두 주치를 남긴다. git 에는 올리지 않는다.
+- 비서 열쇠(Anthropic 키, GitHub 토큰)는 넣지 않는다. Windows 쪽 폴더는 동기화·공유될 수 있어 비밀을 두지 않는다. 다시 깐 뒤에는 열쇠만 다시 넣는다.
+- 되살리기: Debian 을 새로 깔고 `install.ps1`(또는 `setup.sh`)을 돌리면, 할 일 파일이 없을 때 마지막 백업을 알아서 편다. 데이터가 이미 있으면 손대지 않는다.
+- 지금 바로 뜨려면 Debian 에서 `chii-backup`. 손으로 되살리려면 `tar -xzf backup/chiios-....tar.gz` 를 풀어 `home/` 은 `~/.local/share/chiios/` 로, `assistant/` 는 `/var/lib/chiios/assistant/` 로 옮긴다.
 
 ## 봇
 

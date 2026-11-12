@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# chiiOS 백업: 할 일·오늘 기록·비서 대화를 Windows 쪽 폴더로 묶어 둔다.
+# 이 데이터는 WSL 디스크(ext4.vhdx) 안에만 있어서, Debian 을 다시 깔거나 배포판이 망가지면 같이 사라진다.
+# 열쇠(anthropic-key, github-token)는 넣지 않는다. Windows 쪽 폴더는 동기화·공유될 수 있어 비밀을 두지 않는다.
+#
+#   chii-backup            지금 한 번 (setup.sh 가 건 타이머가 매일 04:00 에 부른다)
+set -euo pipefail
+
+dest="${CHII_BACKUP_DIR:-}"
+if [ -z "$dest" ] && [ -f /etc/chiios/chiios.conf ]; then
+  dest="$(. /etc/chiios/chiios.conf && echo "${CHII_BACKUP:-}")"
+fi
+if [ -z "$dest" ]; then
+  echo "백업 폴더를 모른다(/etc/chiios/chiios.conf 의 CHII_BACKUP). setup.sh 를 다시 돌린다." >&2
+  exit 1
+fi
+keep="${CHII_BACKUP_KEEP:-14}"
+mkdir -p "$dest"
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/home" "$tmp/assistant"
+for f in todos.json events.jsonl; do
+  src="$HOME/.local/share/chiios/$f"
+  [ -e "$src" ] && cp -a "$src" "$tmp/home/"
+done
+for f in chat.jsonl brief-last.json chat-archive; do
+  src="/var/lib/chiios/assistant/$f"
+  [ -e "$src" ] && cp -a "$src" "$tmp/assistant/"
+done
+
+name="chiios-$(date +%Y%m%d-%H%M).tar.gz"
+# 다 쓰기 전에 끊겨도 반쪽짜리가 최신 백업으로 보이지 않게, 다른 이름으로 쓰고 나서 바꾼다.
+tar -czf "$dest/$name.part" -C "$tmp" home assistant
+mv -f "$dest/$name.part" "$dest/$name"
+# 오래된 것부터 지운다. 하루 한 번이면 두 주치다.
+ls -1t "$dest"/chiios-*.tar.gz 2>/dev/null | tail -n +"$((keep + 1))" | xargs -r rm -f
+echo "백업: $dest/$name"

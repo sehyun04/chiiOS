@@ -7,3 +7,5 @@ wslconfig text eol=lf
 Dockerfile text eol=lf
 requirements.txt text eol=lf
 compose.yaml text eol=lf
+# bin/ 의 확장자 없는 셸 스크립트도 Debian 에서 그대로 돈다.
+bin/* text eol=lf

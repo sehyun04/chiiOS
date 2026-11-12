@@ -24,4 +24,10 @@ services:
       - ${CHII_WORK:-/var/lib/chiios/no-work}:/work:ro
       # 이미지 기본 시계는 UTC 다. 그대로면 비서가 "지금 07:47" 처럼 한국 시각과 9시간 어긋난 상태를 본다.
       - /etc/localtime:/etc/localtime:ro
+    # chiiOS 기본값(setup.sh 의 daemon.json)과 같지만, 레포를 따로 떼어 다른 데서 돌려도 기록이 끝없이 쌓이지 않게 직접 적는다.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
