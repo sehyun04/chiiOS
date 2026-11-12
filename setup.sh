@@ -201,10 +201,36 @@ step "비서 봇 (포트 $ASSIST_PORT)"
 # 비서는 니나브처럼 따로 도는 봇이다(bots/assistant). 대화와 열쇠는 레포 사본(/opt/chiios)이 아니라
 # 여기 둔다. setup.sh 를 다시 돌릴 때마다 /opt/chiios/bots 는 지우고 새로 깔기 때문이다.
 install -d -m 700 -o "$CHII_USER" -g "$CHII_USER" /var/lib/chiios/assistant
-# 이미지는 매번 굽는다(캐시라 금방). 코드가 바뀌었으면 봇 칸에 '새로 구운 판' 이 떠서 다시 깨울 때 반영된다.
+install -d /var/lib/chiios/no-work
+
+# 비서가 지켜볼 작업 폴더와 GitHub 계정. 한 번 정하면 /etc/chiios/chiios.conf 에 남고, 바꾸려면 그 파일을 고친다.
+conf=/etc/chiios/chiios.conf
+CHII_WORK="${CHII_WORK:-}"
+CHII_GITHUB="${CHII_GITHUB:-}"
+if [ -f "$conf" ]; then
+  # shellcheck disable=SC1090
+  . "$conf"
+fi
+if [ -z "$CHII_WORK" ]; then
+  # 레포가 작업 폴더 안에 있으면(노트북: C:\Users\..\desktop\sehyun\chiiOS) 그 폴더를 본다.
+  # 드라이브나 사용자 폴더 바로 아래(데스크톱: C:\chiiOS)면 너무 넓어서 붙이지 않고 GitHub 만 본다.
+  parent="$(dirname "$CHII_DIR")"
+  if [ "$(printf '%s' "$parent" | tr -cd / | wc -c)" -ge 5 ]; then
+    CHII_WORK="$parent"
+  fi
+fi
+if [ -z "$CHII_GITHUB" ]; then
+  CHII_GITHUB="$(git -c safe.directory='*' -C "$CHII_DIR" remote get-url origin 2>/dev/null | sed -nE 's#.*github\.com[:/]+([^/]+)/.*#\1#p')"
+fi
+printf 'CHII_WORK=%s\nCHII_GITHUB=%s\n' "$CHII_WORK" "$CHII_GITHUB" > "$conf"
+cp "$conf" /opt/chiios/bots/assistant/.env
+echo "작업 폴더: ${CHII_WORK:-(없음, GitHub 만)} · GitHub: ${CHII_GITHUB:-(없음)}"
+
+# 이미지는 매번 굽는다(캐시라 금방).
 docker compose --project-directory /opt/chiios/bots/assistant build -q
-# 처음 깔 때만 띄운다. 대장이 재워 둔 비서를 setup.sh 가 다시 깨우지 않게.
-if [ -z "$(docker ps -aq --filter label=com.docker.compose.project=assistant --filter label=com.docker.compose.project.working_dir)" ]; then
+# 깨어 있으면 새 판·새 설정으로 바꿔 띄우고, 처음이면 띄운다. 대장이 재워 둔 비서는 그대로 둔다.
+assist_id="$(docker ps -aq --filter label=com.docker.compose.project=assistant --filter label=com.docker.compose.project.working_dir)"
+if [ -z "$assist_id" ] || [ "$(docker inspect -f '{{.State.Running}}' "$assist_id")" = "true" ]; then
   docker compose --project-directory /opt/chiios/bots/assistant up -d
 fi
 

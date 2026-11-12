@@ -2,6 +2,8 @@
 # Windows 쪽 브라우저에서도 이 주소가 열리므로, 홈 화면처럼 Host 와 X-Chii 머리글을 보고 다른 사이트의 요청을 막는다.
 import json
 import os
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from assistant import Assistant, say
@@ -54,6 +56,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/clear":
             A.clear()
             return self.send_json({"ok": True})
+        if self.path == "/brief":
+            rec = A.morning()
+            return self.send_json({"ok": bool(rec)}, 200 if rec else 409)
         if self.path == "/chat":
             text = str(data.get("text", "")).strip()[:4000]
             if not text:
@@ -76,6 +81,19 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_error(404)
 
 
+def morning_loop():
+    # 1분마다 아침 보고 때가 됐는지 본다. 시각을 딱 맞춰 재우는 대신 이렇게 하면 PC 가 그 시각에
+    # 꺼져 있었어도 켜진 뒤 바로 따라잡는다.
+    while True:
+        try:
+            if A.brief_due():
+                A.morning()
+        except Exception as e:  # 한 번 실패해도 다음 날 보고는 해야 한다.
+            say(f"아침 보고 실패 · {type(e).__name__}: {e}")
+        time.sleep(60)
+
+
 if __name__ == "__main__":
     say(f"비서 깨어남 · 127.0.0.1:{PORT} · {A.status()['model']} · 열쇠 {'있음' if A.read_key() else '없음'}")
+    threading.Thread(target=morning_loop, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

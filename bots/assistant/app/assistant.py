@@ -11,7 +11,9 @@ from pathlib import Path
 
 import anthropic
 
+import brief
 import home
+import work
 
 # 평소 일(할 일 넣기, 상태 묻기)은 가볍고 싼 모델로 충분하다. 바꾸려면 compose.yaml 환경 변수로.
 MODEL = os.environ.get("ASSIST_MODEL", "claude-haiku-5-5")
@@ -21,6 +23,8 @@ SELF = "assistant"
 HISTORY_TURNS = 20
 # 도구를 부르고 결과를 읽는 왕복의 상한. 넘으면 끊고 그때까지 한 것만 말한다.
 MAX_STEPS = 6
+# 아침 보고 시각(지역 시각). 그 시각에 PC 가 꺼져 있었으면 켜진 뒤 처음 1분 안에 한다.
+BRIEF_AT = os.environ.get("ASSIST_BRIEF_AT", "08:00")
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 DAYS = "월화수목금토일"
 
@@ -35,6 +39,7 @@ SYSTEM = """너는 chiiOS 의 비서 봇이다. chiiOS 는 대장이 디스코�
 - 오늘 정리: 아래 "지금 상태"의 기록·할 일·봇을 보고 오늘 무슨 일이 있었고 무엇이 남았는지 짧게 말한다.
 - 할 일 관리: add_todo, update_todo, delete_todo 로 3번 칸의 할 일을 바꾼다. 할 일 id 는 "지금 상태"에 있다. 대장이 끝냈다고 하면 지우지 말고 끝낸 걸로 바꾼다. 지우는 건 대장이 지우라고 할 때만 한다.
 - 봇 돌보기: bot_control 로 봇을 깨우고(start) 재우고(stop) 다시 굽는다(bake). 쓰러진 이유를 물으면 bot_logs 로 기록을 읽고 원인을 짧게 짚는다.
+- 한 일 정리: "어제 뭐 했지", "이번 주 정리" 같은 질문에는 recent_work 로 모든 저장소의 커밋과 아직 커밋 안 한 변경을 모아 보고 말한다. 매일 아침에는 아침 보고가 대화에 따로 올라온다.
 
 지켜야 할 것
 - 상태는 "지금 상태"와 도구 결과만 믿는다. 모르는 건 지어내지 말고 모른다고 한다.
@@ -102,6 +107,14 @@ TOOLS = [
             "required": ["project"],
         },
     },
+    {
+        "name": "recent_work",
+        "description": "대장이 최근에 한 일을 모은다: 작업 폴더와 GitHub 계정의 모든 저장소 커밋, 아직 커밋하지 않은 변경, 올리지 않은 커밋.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"days": {"type": "integer", "description": "며칠 전부터 볼지. 기본 1, 많아야 14."}},
+        },
+    },
 ]
 # 스트리밍 중에 도구 입력도 생기는 대로 받는다. 대신 서버가 입력을 검사해 주지 않으므로 run_tool 에서 직접 본다.
 for _t in TOOLS:
@@ -143,8 +156,10 @@ class Assistant:
         self.key_file = data / "anthropic-key"
         self.chat_file = data / "chat.jsonl"
         self.archive = data / "chat-archive"
+        self.brief_file = data / "brief-last.json"
         self.busy = threading.Lock()
         self.file_lock = threading.Lock()
+        self.brief_lock = threading.Lock()
 
     # 열쇠 ---------------------------------------------------------------
 
@@ -210,6 +225,7 @@ class Assistant:
             "hasKey": self.read_key() is not None,
             "model": MODEL,
             "busy": self.busy.locked(),
+            "briefAt": BRIEF_AT,
             "turns": self.turns()[-60:],
         }
 
@@ -231,12 +247,13 @@ class Assistant:
                     text = "(답하지 못함)"
             if not text:
                 continue
+            if not msgs and role == "assistant":
+                # 대화가 아침 보고로 시작하면 앞에 묻는 말이 없다. 첫 메시지는 사용자 것이어야 해서 하나 채운다.
+                msgs.append({"role": "user", "content": "(아침 보고를 열어 봄)"})
             if msgs and msgs[-1]["role"] == role:
                 msgs[-1]["content"] += "\n\n" + text
             else:
                 msgs.append({"role": role, "content": text})
-        while msgs and msgs[0]["role"] != "user":
-            msgs.pop(0)
         return msgs
 
     def snapshot(self):
@@ -363,7 +380,84 @@ class Assistant:
                 return f"{word} 실패({data.get('error', code)}). 봇 칸의 기록 단추로 이유를 볼 수 있다.", f"{name_} {word} 실패", None, True
             return f"{word} 됐다", f"{name_} {word}", None, False
 
+        if name == "recent_work":
+            days = args.get("days", 1)
+            days = max(1, min(14, days if isinstance(days, int) else 1))
+            repos, note = work.recent_work(time.time() - days * 86400)
+            lines = []
+            for r in repos:
+                head = f"[{r['name']}] 커밋 {len(r['commits'])}개"
+                if r["dirty"]:
+                    head += f", 커밋 안 한 변경 {r['dirty']}파일"
+                if r["ahead"]:
+                    head += f", 어느 원격에도 없는 커밋 {r['ahead']}개"
+                lines.append(head)
+                for c in r["commits"][:15]:
+                    lines.append(f"  {datetime.fromtimestamp(c['t']):%m-%d %H:%M} {c['subject']} ({c['author']})")
+                if len(r["commits"]) > 15:
+                    lines.append(f"  ...외 {len(r['commits']) - 15}개")
+            if note:
+                lines.append(f"(참고: {note})")
+            return "\n".join(lines) or f"최근 {days}일 동안 커밋도 변경도 없다", f"최근 {days}일 한 일 모아 봄", None, False
+
         return f"{name} 라는 도구는 없다", None, None, True
+
+    # 아침 보고 -----------------------------------------------------------
+
+    def last_brief(self):
+        # 대화와 따로 둔다. [새 대화] 로 대화를 옮겨도 오늘 보고를 다시 하지 않게.
+        try:
+            return json.loads(self.brief_file.read_text(encoding="utf-8")).get("t", 0)
+        except (OSError, ValueError):
+            return 0
+
+    def brief_due(self):
+        now = datetime.now()
+        h, m = (int(x) for x in BRIEF_AT.split(":"))
+        at = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        return now >= at and self.last_brief() < at.timestamp()
+
+    def morning(self):
+        """아침 보고를 만들어 대화에 올린다. 같은 때 두 번 불려도 한 번만 한다."""
+        if not self.brief_lock.acquire(blocking=False):
+            return None
+        try:
+            d = brief.collect(self.last_brief() or time.time() - 86400)
+            lines = brief.facts(d)
+            opening = self.opening(lines) or brief.plain_opening(d)
+            text = f"{opening}\n{brief.title(d)}\n" + "\n".join(lines)
+            rec = {"t": d["t"], "role": "assistant", "kind": "brief", "text": text, "opening": opening,
+                   "brief": d, "tools": []}
+            self.append(rec)
+            self.brief_file.write_text(json.dumps({"t": d["t"]}), encoding="utf-8")
+            say(f"아침 보고 · 커밋 {sum(r['commits'] for r in d['repos'])}개 · 할 일 {len(d['todos'])}개")
+            return rec
+        finally:
+            self.brief_lock.release()
+
+    def opening(self, lines):
+        # 한마디만 모델이 쓴다. 숫자는 위에서 센 것만 보여 주고 새로 만들지 말라고 한다.
+        key = self.read_key()
+        if not key:
+            return None
+        try:
+            r = anthropic.Anthropic(api_key=key, timeout=30.0, max_retries=1).messages.create(
+                model=MODEL,
+                max_tokens=4000,
+                system=SYSTEM,
+                output_config={"effort": EFFORT},
+                messages=[{"role": "user", "content": (
+                    "오늘 아침 보고 자료다.\n" + "\n".join(lines) +
+                    "\n\n대장에게 건넬 첫마디를 한두 문장으로 써. 자료에 없는 숫자나 일은 만들지 말고, "
+                    "오늘 먼저 볼 것 하나를 짚어. 인사말만 쓰지 말 것.")}],
+            )
+        except anthropic.APIError as e:
+            say(f"아침 보고 한마디 실패 · {type(e).__name__}")
+            return None
+        if r.stop_reason == "refusal":
+            return None
+        text = "".join(b.text for b in r.content if b.type == "text").strip()
+        return text or None
 
     def bot_name(self, project):
         st = home.state() or {}

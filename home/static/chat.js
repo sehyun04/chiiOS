@@ -53,8 +53,9 @@
     if (name === "term") {
       window.chiiTerm.show();
       if (focus) window.chiiTerm.focus();
-    } else if (focus) {
-      focusChat();
+    } else {
+      markSeen();
+      if (focus) focusChat();
     }
   }
   function focusChat() {
@@ -225,12 +226,61 @@
     li.append(b);
   }
 
+  const DAYS = "일월화수목금토";
+  const stamp = (t) => {
+    const d = new Date(t * 1000);
+    return `${d.getMonth() + 1}월 ${d.getDate()}일 ${DAYS[d.getDay()]}요일 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+
+  // 아침 보고 카드. 숫자는 비서 봇이 센 것을 그대로 보여 주고, 맨 위 한마디만 비서가 쓴 말이다.
+  function briefRow(t) {
+    const row = botRow();
+    row.li.classList.add("brief");
+    const d = t.brief || {};
+    const head = el("div", "brief-head");
+    head.append(el("b", "", "아침 보고"), el("span", "dim", stamp(t.t)));
+    row.bubble.insertBefore(head, row.txt);
+    row.txt.textContent = t.opening || "";
+    const rows = el("dl", "brief-rows");
+    const add = (k, v, cls) => {
+      rows.append(el("dt", "", k));
+      const dd = el("dd", cls || "");
+      if (typeof v === "string") dd.textContent = v;
+      else dd.append(v);
+      rows.append(dd);
+    };
+    if (d.homeOk === false) add("봇", "홈 화면에 닿지 않아 못 봤어", "bad");
+    else {
+      add("봇", (d.bots || []).map((b) => `${b.name} ${b.status}`).join(" · ") || "올린 봇 없음");
+      add("밤사이", (d.trouble || []).length ? d.trouble.join(" · ") : "쓰러진 봇 없음", (d.trouble || []).length ? "bad" : "");
+      const todos = d.todos || [];
+      add("할 일", todos.length ? `${todos.length}개 남음 · ${todos.join(", ")}` : "남은 할 일 없음");
+    }
+    const repos = d.repos || [];
+    const total = repos.reduce((n, r) => n + r.commits, 0);
+    if (total) {
+      const det = el("details");
+      det.append(el("summary", "", `커밋 ${total}개 · ${repos.filter((r) => r.commits).map((r) => `${r.name} ${r.commits}`).join(" · ")}`));
+      const ul = el("ul");
+      for (const r of repos) for (const s of r.subjects) ul.append(el("li", "", `${r.name} · ${s}`));
+      det.append(ul);
+      add("한 일", det);
+    } else add("한 일", "지난 보고 뒤로 커밋 없음");
+    const dirty = repos.filter((r) => r.dirty).map((r) => `${r.name} ${r.dirty}파일`);
+    if (dirty.length) add("작업 중", `커밋 안 한 변경 · ${dirty.join(" · ")}`);
+    const ahead = repos.filter((r) => r.ahead).map((r) => `${r.name} ${r.ahead}개`);
+    if (ahead.length) add("백업 안 됨", `어느 원격에도 없는 커밋 · ${ahead.join(" · ")}`);
+    row.bubble.append(rows);
+    if (d.note) row.bubble.append(el("p", "dim small", d.note));
+  }
+
   function renderTurns(turns) {
     const now = Date.now() / 1000;
     let last = -1;
     turns.forEach((t, i) => { if (t.role === "assistant") last = i; });
     turns.forEach((t, i) => {
       if (t.role === "user") return meRow(t.text);
+      if (t.kind === "brief") return briefRow(t);
       const row = botRow();
       row.txt.textContent = t.text || "";
       row.txt.hidden = !t.text;
@@ -254,13 +304,40 @@
     if (!info) hello("집이랑 연락이 끊겼어", "홈 화면 서버가 꺼진 것 같아.");
     else if (info.down && info.missing) hello("비서 봇이 아직 없어", "Windows 쪽 chiiOS 폴더에서 setup.sh 를 다시 돌리면 구워서 깨운다.");
     else if (info.down) sleeping();
-    else if (!info.hasKey) keyForm();
-    else if (!info.turns.length) greet();
+    else if (!info.hasKey) {
+      // 열쇠가 없어도 아침 보고는 나온다(맨 위 한마디만 정해진 말로 바뀐다). 열쇠 칸 위에 같이 보여 준다.
+      renderTurns(info.turns.filter((t) => t.kind === "brief"));
+      keyForm();
+    } else if (!info.turns.length) greet();
     else {
       renderTurns(info.turns);
       toBottom();
     }
+    const turns = (info && info.turns) || [];
+    shown = turns.length ? turns[turns.length - 1].t : 0;
+    const today = new Date().setHours(0, 0, 0, 0) / 1000;
+    const brief = turns.filter((t) => t.kind === "brief" && t.t >= today).pop();
+    window.chiiBrief = brief ? brief.t : 0;
+    markSeen();
   }
+
+  // 아침 보고를 본 걸로 친다: 비서 탭이 보이고 창이 앞에 있을 때. 상태줄 말풍선이 이걸 보고 알림을 거둔다.
+  function markSeen() {
+    if (tab !== "chat" || document.visibilityState !== "visible" || !document.hasFocus() || !window.chiiBrief) return;
+    try { localStorage.setItem("chii-brief-seen", String(window.chiiBrief)); } catch {}
+  }
+  window.addEventListener("focus", markSeen);
+
+  // 아침 보고는 정해진 시각에 비서 봇 쪽에서 생긴다. 열어 둔 화면에도 1분 안에 올라오게 가끔 묻는다.
+  let shown = 0;
+  setInterval(async () => {
+    if (busy) return;
+    try {
+      const s = await (await fetch("/api/assistant", { cache: "no-store" })).json();
+      const latest = s.turns && s.turns.length ? s.turns[s.turns.length - 1].t : 0;
+      if (latest !== shown || !!s.down !== !!(info && info.down)) await load();
+    } catch {}
+  }, 60000);
 
   // 보내기 --------------------------------------------------------------
 
@@ -354,6 +431,15 @@
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     send(input.value);
+  });
+
+  $("#chat-brief").addEventListener("click", async (e) => {
+    const b = e.currentTarget;
+    if (busy || b.disabled) return;
+    b.disabled = true;
+    try { await post("/api/assistant/brief"); } catch {}
+    b.disabled = false;
+    await load();
   });
 
   $("#chat-new").addEventListener("click", async () => {

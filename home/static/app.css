@@ -414,3 +414,16 @@ dialog .btns:empty { display: none; }
 
 /* 낮밤이 바뀔 때 화면 전체를 한 번에 겹쳐 넘긴다(app.js 의 startViewTransition). */
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.45s; }
+
+/* 아침 보고 카드. 사실 줄은 이름표·값 두 칸으로 줄 맞춰 훑기 쉽게. */
+.msg.ai.brief .bubble { width: min(620px, 100%); }
+.brief-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.brief-head b { font-family: var(--round); font-weight: 400; font-size: 17px; }
+.brief-head .dim { font-size: 12px; }
+.brief-rows { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; margin: 10px 0 0; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 13.5px; line-height: 1.55; }
+.brief-rows dt { color: var(--ink-3); font-weight: 700; white-space: nowrap; }
+.brief-rows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.brief-rows dd.bad { color: var(--red-ink); }
+.brief-rows summary { cursor: pointer; }
+.brief-rows details ul { margin: 6px 0 2px; padding-left: 16px; color: var(--ink-2); font-size: 13px; }
+.msg .small { font-size: 12px; margin: 8px 0 0; }

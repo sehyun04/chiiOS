@@ -514,7 +514,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "그런 할 일이 없다"}, 404)
             return self.send_json({"ok": True, "item": item})
 
-        if u.path in ("/api/assistant/key", "/api/assistant/clear", "/api/assistant/chat"):
+        if u.path in ("/api/assistant/key", "/api/assistant/clear", "/api/assistant/chat", "/api/assistant/brief"):
             return self.assistant("POST", "/" + u.path.rsplit("/", 1)[1], data, stream=u.path.endswith("/chat"))
 
         return self.send_error(404)

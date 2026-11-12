@@ -131,7 +131,10 @@ function renderBar(s) {
   const down = (s.bots || []).find((b) => botStatus(b).cls === "down");
   const left = s.todos.filter((t) => !t.done).length;
   let say;
+  let seen = 0;
+  try { seen = Number(localStorage.getItem("chii-brief-seen") || 0); } catch {}
   if (down) say = `대장, ${josa(down.name, "이", "가")} 쓰러졌어`;
+  else if (window.chiiBrief && window.chiiBrief > seen) say = "대장, 아침 보고 왔어";
   else if (left) say = `대장, 할 일 ${left}개 남았어~`;
   else if (s.todos.length) say = "대장, 오늘 할 일 다 했어!";
   else say = "대장, 오늘은 뭐 할 거야?";
