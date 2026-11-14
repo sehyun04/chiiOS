@@ -432,3 +432,6 @@ dialog .btns:empty { display: none; }
 .seg.glass.upd { min-height: 34px; padding: 0 12px 0 10px; gap: 6px; font-size: 13px; }
 .upd-list { margin: 0 0 12px; padding-left: 18px; max-height: 40vh; overflow: auto; font-size: 13.5px; line-height: 1.75; }
 .upd-list .mono { margin-right: 6px; }
+
+/* 전체 화면 단추: 아이콘만, 다른 상태줄 조각과 높이를 맞춘다. */
+.seg.glass.full { min-height: 34px; width: 38px; padding: 0; justify-content: center; }

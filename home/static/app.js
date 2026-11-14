@@ -10,6 +10,8 @@ const ICON = {
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>',
   x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>',
   sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>',
+  expand: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>',
+  shrink: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v3a2 2 0 0 1-2 2H3"></path><path d="M21 8h-3a2 2 0 0 1-2-2V3"></path><path d="M3 16h3a2 2 0 0 1 2 2v3"></path><path d="M16 21v-3a2 2 0 0 1 2-2h3"></path></svg>',
   sunMoon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a2.83 2.83 0 0 0 4 4 4 4 0 1 1-4-4"></path><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.9 4.9 1.4 1.4"></path><path d="m17.7 17.7 1.4 1.4"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.3 17.7-1.4 1.4"></path><path d="m19.1 4.9-1.4 1.4"></path></svg>',
 };
 
@@ -363,6 +365,39 @@ document.addEventListener("keydown", (e) => {
 });
 
 $("#upd").addEventListener("click", openUpdate);
+
+// 전체 화면. 앱 창을 최대화해도 Windows 제목 줄은 남는다. 페이지를 전체 화면으로 올려 제목 줄과 작업 표시줄까지 걷는다.
+// 전체 화면의 Esc 는 원래 '나가기' 라 터미널(vim 등)에 닿지 않는다. 키보드 잠금으로 Esc 를 페이지에 남기고,
+// 나가기는 F11·단추·Esc 길게 누르기로 한다.
+async function toggleFull() {
+  try {
+    if (document.fullscreenElement) {
+      navigator.keyboard?.unlock?.();
+      await document.exitFullscreen();
+    } else {
+      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+      await navigator.keyboard?.lock?.(["Escape"]).catch(() => {});
+    }
+  } catch {}
+}
+function showFull() {
+  const on = !!document.fullscreenElement;
+  const btn = $("#full");
+  btn.innerHTML = on ? ICON.shrink : ICON.expand;
+  btn.title = on ? "전체 화면 나가기 (F11, 또는 Esc 길게)" : "전체 화면 (F11)";
+  btn.setAttribute("aria-label", on ? "전체 화면 나가기" : "전체 화면");
+  btn.setAttribute("aria-pressed", String(on));
+}
+$("#full").addEventListener("click", toggleFull);
+document.addEventListener("fullscreenchange", showFull);
+// 붙잡는 단계(capture)에서 먼저 받는다. 그러지 않으면 터미널이 F11 을 셸 키로 먹어 버린다.
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "F11" || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  e.preventDefault();
+  e.stopPropagation();
+  toggleFull();
+}, true);
+showFull();
 
 // 상태줄 하치와레 말풍선은 비서로 들어가는 문이다.
 $("#bubble").addEventListener("click", () => {
