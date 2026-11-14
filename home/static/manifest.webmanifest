@@ -1,9 +1,15 @@
 {
+  "id": "/",
   "name": "chiiOS",
   "short_name": "chiiOS",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay"],
   "background_color": "#f4eada",
   "theme_color": "#f4eada",
-  "icons": [{ "src": "faces/hachiware-work.png", "sizes": "240x240", "type": "image/png" }]
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
 }

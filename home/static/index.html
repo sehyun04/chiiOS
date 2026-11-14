@@ -21,6 +21,11 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
+<!-- 앱으로 설치해 열면 Windows 제목 줄 자리를 이 줄이 대신한다. 오른쪽 위 창 단추(최소화·최대화·닫기)만 Windows 것. -->
+<header class="titlebar" aria-hidden="true">
+  <img src="faces/hachiware-work.png" alt="">
+  <span>chiiOS</span>
+</header>
 <div class="desk">
   <section class="pane main on" data-n="1">
     <header>
@@ -111,6 +116,8 @@
     <button class="seg glass bubble" id="bubble" type="button" title="비서와 이야기하기"><img src="faces/hachiware-work.png" alt=""><span id="say"></span></button>
     <button class="seg glass primary upd" id="upd" type="button" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg><span id="upd-label"></span></button>
+    <button class="seg glass primary install" id="install" type="button" hidden title="제목 줄 없는 chiiOS 앱으로 설치">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="M10 4v4"></path><path d="M2 8h20"></path><path d="M6 4v4"></path></svg>앱으로 설치</button>
     <button class="seg glass full" id="full" type="button" title="전체 화면 (F11)" aria-label="전체 화면"></button>
     <button class="seg glass mode" id="mode" type="button"><span id="mode-icon"></span><span id="mode-label"></span></button>
     <span class="seg card mono" id="clock"></span>

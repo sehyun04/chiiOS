@@ -94,6 +94,8 @@
 }
 
 * { box-sizing: border-box; }
+/* display 를 준 요소(상태줄 단추 등)는 hidden 속성의 기본 display:none 을 이긴다. 숨긴 단추가 빈 채로 보였다. */
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   background-color: var(--paper-2);
@@ -435,3 +437,29 @@ dialog .btns:empty { display: none; }
 
 /* 전체 화면 단추: 아이콘만, 다른 상태줄 조각과 높이를 맞춘다. */
 .seg.glass.full { min-height: 34px; width: 38px; padding: 0; justify-content: center; }
+
+/* 앱으로 설치해 열었을 때(창 컨트롤 오버레이)만 보이는 제목 줄. Windows 가 비워 준 자리(titlebar-area)에
+   들어가고, 끌어서 창을 옮길 수 있게 drag 영역으로 둔다. 높이는 Windows 창 단추 높이를 따른다. */
+.titlebar { display: none; }
+.seg.glass.install { min-height: 34px; padding: 0 12px 0 10px; gap: 6px; font-size: 13px; }
+@media (display-mode: window-controls-overlay) {
+  .titlebar {
+    position: fixed;
+    top: env(titlebar-area-y, 0);
+    left: env(titlebar-area-x, 0);
+    width: env(titlebar-area-width, 100%);
+    height: env(titlebar-area-height, 32px);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 14px;
+    font-family: var(--round);
+    font-size: 13px;
+    color: var(--ink-2);
+    user-select: none;
+    app-region: drag;
+    -webkit-app-region: drag;
+  }
+  .titlebar img { width: 18px; height: 18px; object-fit: contain; }
+  .desk { padding-top: calc(env(titlebar-area-height, 32px) + 2px); }
+}

@@ -389,6 +389,32 @@ function showFull() {
   btn.setAttribute("aria-pressed", String(on));
 }
 $("#full").addEventListener("click", toggleFull);
+
+// 앱으로 설치. 설치한 chiiOS 는 Windows 제목 줄 대신 홈 화면이 그린 작은 줄을 쓴다(창 컨트롤 오버레이).
+// 이미 앱으로 열려 있으면 Edge 가 설치 제안을 보내지 않으니 단추도 뜨지 않는다.
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  // 이미 설치한 앱 창 안에서는 설치를 권할 까닭이 없다. standalone 은 빼지 않는다: 설치 전의 주소창 없는 창
+  // (start.cmd 의 --app)도 standalone 이고, 설치는 바로 거기서 한다.
+  if (matchMedia("(display-mode: window-controls-overlay)").matches) return;
+  installPrompt = e;
+  $("#install").hidden = false;
+});
+$("#install").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  const { outcome } = await installPrompt.userChoice.catch(() => ({ outcome: "dismissed" }));
+  if (outcome === "accepted") {
+    installPrompt = null;
+    $("#install").hidden = true;
+  }
+});
+window.addEventListener("appinstalled", () => {
+  $("#install").hidden = true;
+  // 설치하면 Edge 가 지금 창을 그대로 앱 창으로 옮긴다. 이 창이 곧 앱이니 닫으라고 하지 않는다.
+  dialog("앱으로 설치했어", "<p>이제부터 바탕화면의 chiiOS 로 열면 이렇게 제목 줄 없이 열린다.</p>");
+});
 document.addEventListener("fullscreenchange", showFull);
 // 붙잡는 단계(capture)에서 먼저 받는다. 그러지 않으면 터미널이 F11 을 셸 키로 먹어 버린다.
 window.addEventListener("keydown", (e) => {
@@ -410,8 +436,11 @@ window.chiiRefresh = refresh;
 // 처음 한 번만 넉넉하게 키워 가운데 둔다. 그 뒤 크기는 Edge 가 창마다 기억하므로 사용자가 바꾼 대로 남는다.
 (() => {
   // 앱 창에서도 locationbar.visible 은 true 로 나온다(Edge 157 확인). 앱 창인지는 display-mode 로 가린다.
-  if (!matchMedia("(display-mode: standalone)").matches) return;
-  try { if (localStorage.getItem("chii-sized")) return; localStorage.setItem("chii-sized", "1"); } catch { return; }
+  // 설치한 앱(제목 줄 없는 창)은 창이 새로 생기는 것이라 따로 한 번 더 키운다(Edge 가 처음에 790x956 으로 열었다).
+  const wco = matchMedia("(display-mode: window-controls-overlay)").matches;
+  if (!wco && !matchMedia("(display-mode: standalone)").matches) return;
+  const key = wco ? "chii-sized-app" : "chii-sized";
+  try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch { return; }
   if (window.outerWidth >= 1280) return;
   const w = Math.min(1480, screen.availWidth);
   const h = Math.min(940, screen.availHeight);

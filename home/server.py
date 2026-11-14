@@ -54,7 +54,8 @@ UPDATE_STATE = Path("/var/lib/chiios/update.json")
 UPDATE_LOG = Path("/var/log/chiios-update.log")
 CHECK_EVERY = 30 * 60
 # 이 파일이 바뀐 판은 Debian 쪽 setup.sh 만으로는 반영되지 않는다(바로가기·자동 켜기·.wslconfig).
-WINDOWS_SIDE = ("install.ps1", "autostart.ps1", "shortcut.ps1", "start.cmd", "wslconfig", "chiios.ico")
+# start.cmd·open.ps1·chiios.ico 는 바로가기가 레포 것을 그대로 부르므로 받기만 하면 바뀐다.
+WINDOWS_SIDE = ("install.ps1", "autostart.ps1", "shortcut.ps1", "wslconfig")
 update = {"enabled": False, "reason": "아직 확인 전", "commits": [], "windows": [], "checkedAt": 0, "fetched": False}
 update_lock = threading.Lock()
 
