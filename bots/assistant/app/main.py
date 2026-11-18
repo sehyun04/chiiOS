@@ -94,6 +94,6 @@ def morning_loop():
 
 
 if __name__ == "__main__":
-    say(f"비서 깨어남 · 127.0.0.1:{PORT} · {A.status()['model']} · 열쇠 {'있음' if A.read_key() else '없음'}")
+    say(f"하치와레 깨어남 · 127.0.0.1:{PORT} · {A.status()['model']} · 열쇠 {'있음' if A.read_key() else '없음'}")
     threading.Thread(target=morning_loop, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

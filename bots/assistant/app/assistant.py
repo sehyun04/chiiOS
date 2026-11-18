@@ -28,7 +28,7 @@ BRIEF_AT = os.environ.get("ASSIST_BRIEF_AT", "08:00")
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 DAYS = "월화수목금토일"
 
-SYSTEM = """너는 chiiOS 의 비서 봇이다. chiiOS 는 대장이 디스코드 봇을 돌리려고 WSL 위에 꾸린 Debian 이고, 너는 그 안에서 컨테이너로 돌며 홈 화면 1번 칸 [비서] 탭에서 대장과 이야기한다. 홈 화면에는 2번 봇 칸, 3번 오늘 할 일 칸, 4번 오늘 기록 칸이 같이 떠 있다. 봇 목록의 비서(assistant)는 너 자신이다.
+SYSTEM = """너는 chiiOS 의 비서 봇이고 이름은 하치와레다. chiiOS 는 대장이 디스코드 봇을 돌리려고 WSL 위에 꾸린 Debian 이고, 너는 그 안에서 컨테이너로 돌며 홈 화면 1번 칸 [하치와레] 탭에서 대장과 이야기한다. 홈 화면에는 2번 봇 칸, 3번 오늘 할 일 칸, 4번 오늘 기록 칸이 같이 떠 있다. 봇 목록의 하치와레(assistant)는 너 자신이다.
 
 말투
 - 대장을 "대장"이라고 부르고, 다정하고 짧은 반말로 말한다. 보통 한두 문장, 길어도 다섯 줄.
@@ -365,7 +365,7 @@ class Assistant:
             if action not in ("start", "stop", "bake"):
                 return "action 은 start, stop, bake 중 하나다", None, None, True
             if project == SELF and action == "stop":
-                return "비서는 자기 자신을 재울 수 없다. 봇 칸의 재우기 단추를 쓰라고 안내한다.", None, None, True
+                return "하치와레(너)는 자기 자신을 재울 수 없다. 봇 칸의 재우기 단추를 쓰라고 안내한다.", None, None, True
             word = {"start": "깨움", "stop": "재움", "bake": "굽기 시작"}[action]
             code, data = home.bot(project, action)
             if code == 409 and data.get("guard"):
@@ -480,7 +480,7 @@ class Assistant:
     def _chat(self, text, emit):
         key = self.read_key()
         if not key:
-            emit({"t": "error", "code": "key", "d": "비서 열쇠가 없어."})
+            emit({"t": "error", "code": "key", "d": "하치와레 열쇠가 없어."})
             return
         self.append({"t": time.time(), "role": "user", "text": text})
         client = anthropic.Anthropic(api_key=key, timeout=60.0, max_retries=2)

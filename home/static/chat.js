@@ -157,8 +157,8 @@
   }
 
   function keyForm(message) {
-    const li = hello("비서 열쇠가 아직 없어",
-      "Claude Console 에서 만든 비서 전용 API 키를 넣어 줘. 비서 봇 안(/var/lib/chiios/assistant)에만 저장되고 화면에는 다시 나오지 않아.");
+    const li = hello("하치와레 열쇠가 아직 없어",
+      "Claude Console 에서 만든 하치와레 전용 API 키를 넣어 줘. 하치와레 봇 안(/var/lib/chiios/assistant)에만 저장되고 화면에는 다시 나오지 않아.");
     li.classList.add("key");
     const f = el("form", "key-form");
     const k = el("input");
@@ -167,7 +167,7 @@
     k.placeholder = "sk-ant-...";
     k.autocomplete = "off";
     k.spellcheck = false;
-    k.setAttribute("aria-label", "비서 API 키");
+    k.setAttribute("aria-label", "하치와레 API 키");
     const b = el("button", "glass primary", "넣기");
     b.type = "submit";
     f.append(k, b);
@@ -203,8 +203,8 @@
 
   // 비서는 따로 도는 봇이라 재워 둘 수 있다. 그때는 여기서 바로 깨운다(봇 칸 깨우기와 같은 길).
   function sleeping() {
-    const li = hello("비서가 자고 있어", "깨우면 바로 이야기할 수 있어");
-    const b = el("button", "glass primary", "비서 깨우기");
+    const li = hello("하치와레가 자고 있어", "깨우면 바로 이야기할 수 있어");
+    const b = el("button", "glass primary", "하치와레 깨우기");
     b.type = "button";
     b.style.marginTop = "14px";
     b.onclick = async () => {
@@ -299,10 +299,10 @@
     log.replaceChildren();
     const ok = !!info && !info.down && info.hasKey;
     input.disabled = sendBtn.disabled = !ok;
-    input.placeholder = ok ? "비서에게 말 걸기  ·  Enter 보내기, Shift+Enter 줄바꿈"
-      : info && info.down ? "비서를 깨우면 말을 걸 수 있어" : "열쇠를 넣으면 말을 걸 수 있어";
+    input.placeholder = ok ? "하치와레에게 말 걸기  ·  Enter 보내기, Shift+Enter 줄바꿈"
+      : info && info.down ? "하치와레를 깨우면 말을 걸 수 있어" : "열쇠를 넣으면 말을 걸 수 있어";
     if (!info) hello("집이랑 연락이 끊겼어", "홈 화면 서버가 꺼진 것 같아.");
-    else if (info.down && info.missing) hello("비서 봇이 아직 없어", "Windows 쪽 chiiOS 폴더에서 setup.sh 를 다시 돌리면 구워서 깨운다.");
+    else if (info.down && info.missing) hello("하치와레 봇이 아직 없어", "Windows 쪽 chiiOS 폴더에서 setup.sh 를 다시 돌리면 구워서 깨운다.");
     else if (info.down) sleeping();
     else if (!info.hasKey) {
       // 열쇠가 없어도 아침 보고는 나온다(맨 위 한마디만 정해진 말로 바뀐다). 열쇠 칸 위에 같이 보여 준다.

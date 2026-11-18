@@ -23,6 +23,42 @@ foreach ($f in $links) {
 }
 if ($app) {
     Start-Process $app.TargetPath -ArgumentList $app.Arguments
+    # 설치한 앱은 '켜면 chiiOS' 의 화면이라 최대화로 연다. 작업 표시줄이 자동 숨기기면 그 자리까지 덮는다.
+    # --start-maximized 는 못 쓴다: Edge 가 이미 떠 있으면(시작 부스트) 먼저 뜬 Edge 의 명령줄만 본다. 그래서 창을 찾아 키운다.
+    Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class ChiiWin {
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  public static IntPtr Find(string title, string cls, string exe) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      var t = new StringBuilder(256); GetWindowText(h, t, 256);
+      var c = new StringBuilder(256); GetClassName(h, c, 256);
+      if (t.ToString() != title || c.ToString() != cls) return true;
+      uint pid; GetWindowThreadProcessId(h, out pid);
+      try { if (!System.Diagnostics.Process.GetProcessById((int)pid).ProcessName.Equals(exe, StringComparison.OrdinalIgnoreCase)) return true; }
+      catch { return true; }
+      found = h; return false;
+    }, IntPtr.Zero);
+    return found;
+  }
+}
+"@
+    # 켜자마자 부르면 Edge 가 처음 뜨는 데 몇 초 걸린다.
+    for ($i = 0; $i -lt 60; $i++) {
+        $h = [ChiiWin]::Find('chiiOS', 'Chrome_WidgetWin_1', 'msedge')
+        if ($h -ne [IntPtr]::Zero) { [ChiiWin]::ShowWindow($h, 3) | Out-Null; break }
+        Start-Sleep -Milliseconds 250
+    }
     return
 }
 $edge = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe' -ErrorAction SilentlyContinue).'(default)'

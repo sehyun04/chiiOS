@@ -734,7 +734,7 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             if path == "/status":
                 return self.send_json({"down": True, "missing": find_bot(ASSIST_PROJECT) is None})
-            return self.send_json({"error": "비서가 자고 있어. 깨워 줘."}, 503)
+            return self.send_json({"error": "하치와레가 자고 있어. 깨워 줘."}, 503)
         if not stream or resp.status != 200:
             data = resp.read()
             self.send_response(resp.status)
