@@ -106,8 +106,14 @@
     </section>
   </div>
 
+  <!-- 바탕화면: Windows 바탕화면 아이콘을 같은 배치로. 칸들 자리에 겹쳐 뜬다(desktop.js). -->
+  <section class="deskview" id="deskview" hidden aria-label="바탕화면">
+    <div class="desk-grid" id="desk-grid"></div>
+    <p class="desk-note dim" id="desk-note" hidden></p>
+  </section>
+
   <footer class="bar">
-    <span class="seg brand">chiiOS</span>
+    <button class="seg brand" id="brand" type="button" title="바탕화면 (Alt+D)" aria-pressed="false">chiiOS</button>
     <span class="seg sky"><i class="dot"></i><span id="up"></span></span>
     <span class="seg sun">메모리<span class="meter"><span id="mem-fill"></span></span><span id="mem"></span></span>
     <span class="seg blush" id="disk"></span>
@@ -136,6 +142,7 @@
 <script src="vendor/xterm/addon-web-links.js"></script>
 <script src="term.js"></script>
 <script src="chat.js"></script>
+<script src="desktop.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

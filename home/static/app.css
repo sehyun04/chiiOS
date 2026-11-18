@@ -463,3 +463,32 @@ dialog .btns:empty { display: none; }
   .titlebar img { width: 18px; height: 18px; object-fit: contain; }
   .desk { padding-top: calc(env(titlebar-area-height, 32px) + 2px); }
 }
+
+/* 바탕화면. 칸들과 같은 자리(위 줄 전체)에 겹쳐 뜨고, 그동안 칸들은 자리만 지킨 채 숨는다.
+   아이콘은 Windows 와 같은 칸 배치로 절대 위치에 놓는다. 고르면 하늘색, 두 번 누르면 연다. */
+/* 격자 칸에 넣으면 칸들이 다음 줄로 밀려나 바탕화면 높이가 0 이 된다. 칸들 위에 따로 덮는다(아래 상태줄 34px + 틈 12px 은 비운다). */
+.desk { position: relative; }
+.deskview { position: absolute; top: 12px; left: 12px; right: 12px; bottom: 58px; overflow: hidden; }
+@media (display-mode: window-controls-overlay) { .deskview { top: calc(env(titlebar-area-height, 32px) + 2px); } }
+.desk.desktop-on > .pane.main, .desk.desktop-on > .side { visibility: hidden; }
+.desk-grid { position: absolute; inset: 8px; }
+.dicon {
+  position: absolute; width: var(--cw); height: var(--ch);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 6px 4px 0; border: 1px solid transparent; border-radius: 10px;
+  background: none; color: var(--ink); cursor: default;
+}
+.dicon img { width: var(--ic); height: var(--ic); object-fit: contain; pointer-events: none; }
+.dicon span {
+  font-size: 12px; line-height: 1.3; text-align: center; max-width: 100%;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.dicon:hover { background: color-mix(in srgb, var(--sky-tint) 55%, transparent); }
+.dicon:focus { outline: none; background: var(--sky-tint); border-color: color-mix(in srgb, var(--sky) 60%, transparent); }
+.dicon:focus span { -webkit-line-clamp: 4; }
+.desk-note { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; font-size: 14px; }
+.deskview.loading .desk-grid { opacity: 0.85; }
+.seg.brand { border: 0; cursor: pointer; }
+.seg.brand[aria-pressed="true"] { background: var(--sky); color: var(--card); }
+.seg.brand:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }

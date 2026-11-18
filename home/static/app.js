@@ -441,9 +441,10 @@ window.chiiRefresh = refresh;
   if (!wco && !matchMedia("(display-mode: standalone)").matches) return;
   const key = wco ? "chii-sized-app" : "chii-sized";
   try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch { return; }
-  if (window.outerWidth >= 1280) return;
-  const w = Math.min(1480, screen.availWidth);
-  const h = Math.min(940, screen.availHeight);
+  if (!wco && window.outerWidth >= 1280) return;
+  // 설치한 앱은 '켜면 chiiOS' 의 화면이라 작업 표시줄 위를 꽉 채운다. 주소창 없는 창은 넉넉한 크기로만.
+  const w = wco ? screen.availWidth : Math.min(1480, screen.availWidth);
+  const h = wco ? screen.availHeight : Math.min(940, screen.availHeight);
   window.resizeTo(w, h);
   window.moveTo((screen.availLeft || 0) + (screen.availWidth - w) / 2, (screen.availTop || 0) + (screen.availHeight - h) / 2);
 })();

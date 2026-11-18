@@ -468,6 +468,59 @@ def start_update():
     return True, None
 
 
+# 바탕화면. Windows 쪽 desktop.ps1 이 레포의 .cache/desktop 에 배치(layout.json)와 아이콘을 써 두면 그걸 내준다.
+# 읽기는 Windows 탐색기한테 물어야 해서 Windows 의 powershell.exe 로 돌린다(WSL interop).
+def desktop_dir():
+    repo = read_conf().get("CHII_REPO", "")
+    return Path(repo) / ".cache" / "desktop" if repo else None
+
+
+def desktop_layout():
+    d = desktop_dir()
+    if not d:
+        return None
+    try:
+        return json.loads((d / "layout.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+
+
+desktop_lock = threading.Lock()
+
+
+def desktop_refresh():
+    repo = read_conf().get("CHII_REPO", "")
+    ps = Path("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+    if not repo or not ps.exists():
+        return False
+    with desktop_lock:
+        try:
+            win = subprocess.run(["wslpath", "-w", str(Path(repo) / "desktop.ps1")], capture_output=True,
+                                 text=True, timeout=5).stdout.strip()
+            p = subprocess.run([str(ps), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", win],
+                               capture_output=True, timeout=60, cwd="/mnt/c")
+            return p.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+
+def desktop_open(item_id):
+    """읽어 둔 바탕화면 목록에 있는 항목만 연다. 아무 경로나 받아 실행하는 문이 되면 안 된다."""
+    lay = desktop_layout() or {}
+    item = next((i for i in lay.get("items") or [] if i.get("id") == item_id), None)
+    if not item or not item.get("parse"):
+        return False
+    target = item["parse"]
+    # 휴지통·내 PC 같은 셸 항목은 ::{GUID} 로 온다. 파일·바로가기·폴더는 탐색기에게 두 번 누른 것처럼 열게 한다.
+    arg = "shell:" + target if target.startswith("::") else target
+    try:
+        subprocess.Popen(["/mnt/c/Windows/explorer.exe", arg], cwd="/mnt/c",
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return True
+    except OSError:
+        return False
+
+
 def bake(bot):
     project = bot["project"]
     if project in baking:
@@ -547,6 +600,27 @@ class Handler(BaseHTTPRequestHandler):
             return self.assistant("GET", "/status")
         if u.path == "/api/update":
             return self.send_json({**update, "progress": update_progress()})
+        if u.path == "/api/desktop":
+            lay = desktop_layout()
+            if not lay:
+                return self.send_json({"items": [], "missing": True})
+            # 화면에는 자리와 이름만 있으면 된다. 실제 경로는 여기 남겨 두고 열 때만 쓴다.
+            items = [{k: i.get(k) for k in ("id", "name", "x", "y", "icon")} for i in lay.get("items") or []]
+            return self.send_json({**{k: lay.get(k) for k in ("t", "spacing", "screen")}, "items": items})
+        m = re.fullmatch(r"/desktop/icons/([0-9a-f]{16})\.png", u.path)
+        if m:
+            d = desktop_dir()
+            f = d / "icons" / f"{m.group(1)}.png" if d else None
+            if not f or not f.is_file():
+                return self.send_error(404)
+            data = f.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return None
         return self.static(u.path)
 
     def static(self, path):
@@ -631,6 +705,12 @@ class Handler(BaseHTTPRequestHandler):
             if not item:
                 return self.send_json({"error": "그런 할 일이 없다"}, 404)
             return self.send_json({"ok": True, "item": item})
+
+        if u.path == "/api/desktop/refresh":
+            return self.send_json({"ok": desktop_refresh()})
+        if u.path == "/api/desktop/open":
+            ok = desktop_open(str(data.get("id", "")))
+            return self.send_json({"ok": ok}, 200 if ok else 404)
 
         if u.path == "/api/update/check":
             return self.send_json(check_update())
