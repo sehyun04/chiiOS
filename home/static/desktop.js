@@ -122,6 +122,9 @@
       toggle();
     } else if (on && e.key === "Escape") {
       toggle(false);
+    } else if (on && e.altKey && e.code === "Digit1") {
+      // 바탕화면은 1번 칸 자리에 뜬다. Alt+1 은 그 칸(비서·터미널)으로 돌아가는 것으로 친다. 포커스는 app.js 가 옮긴다.
+      toggle(false);
     }
   }, true);
   new ResizeObserver(() => { if (on) render(); }).observe(view);
