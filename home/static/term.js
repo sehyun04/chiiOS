@@ -49,7 +49,8 @@
 
   function connect() {
     cover.hidden = true;
-    ws = new WebSocket(`ws://${location.host}/term/ws`, ["tty"]);
+    // 다른 기기에서는 Tailscale 의 https 주소로 열리니 웹소켓도 wss 여야 한다(https 페이지에서 ws 는 브라우저가 막는다).
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/term/ws`, ["tty"]);
     ws.binaryType = "arraybuffer";
     ws.onopen = () => {
       // ttyd 는 이 첫 메시지(창 크기)를 받고서야 셸을 띄운다.
