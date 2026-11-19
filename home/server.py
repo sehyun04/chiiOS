@@ -26,6 +26,8 @@ PORT = int(os.environ.get("CHII_HOME_PORT", "7682"))
 TERM_PORT = int(os.environ.get("CHII_TERM_PORT", "7681"))
 ASSIST_PORT = int(os.environ.get("CHII_ASSIST_PORT", "7683"))
 ASSIST_PROJECT = "assistant"
+# 다른 기기(노트북·폰)는 Windows 쪽 Tailscale Serve 로 들어온다(remote.ps1). 이 PC 의 Tailscale 이름과 주인 계정을 그쪽에 묻는다.
+TAILSCALE = Path(os.environ.get("CHII_TAILSCALE", "/mnt/c/Program Files/Tailscale/tailscale.exe"))
 
 TODOS = STATE_DIR / "todos.json"
 EVENTS = STATE_DIR / "events.jsonl"
@@ -470,6 +472,30 @@ def start_update():
 
 # 바탕화면. Windows 쪽 desktop.ps1 이 레포의 .cache/desktop 에 배치(layout.json)와 아이콘을 써 두면 그걸 내준다.
 # 읽기는 Windows 탐색기한테 물어야 해서 Windows 의 powershell.exe 로 돌린다(WSL interop).
+_remote = {"t": 0.0, "host": None, "login": None}
+remote_lock = threading.Lock()
+
+
+def remote_info():
+    """Tailscale 이 이 PC 에 붙인 이름(xxx.ts.net)과 이 PC 주인의 Tailscale 계정. 없으면 둘 다 None.
+    로그인·이름은 드물게 바뀌니 1분 동안 기억한다. 다른 기기에서 온 요청일 때만 부른다."""
+    with remote_lock:
+        if time.time() - _remote["t"] < 60:
+            return dict(_remote)
+        host = login = None
+        if TAILSCALE.exists():
+            try:
+                out = subprocess.run([str(TAILSCALE), "status", "--json"], capture_output=True, timeout=10).stdout
+                st = json.loads(out.decode("utf-8", "replace"))
+                me = st.get("Self") or {}
+                host = (me.get("DNSName") or "").rstrip(".").lower() or None
+                login = ((st.get("User") or {}).get(str(me.get("UserID"))) or {}).get("LoginName") or None
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                pass
+        _remote.update(t=time.time(), host=host, login=login)
+        return dict(_remote)
+
+
 def desktop_dir():
     repo = read_conf().get("CHII_REPO", "")
     return Path(repo) / ".cache" / "desktop" if repo else None
@@ -549,10 +575,25 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    remote = None
+
     def host_ok(self):
         # localhost 이름으로만 받는다. 다른 이름이 이 주소를 가리키게 해서 들어오는 우회(DNS rebinding)를 막는다.
-        host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
-        return host in ("localhost", "127.0.0.1")
+        # 예외는 Tailscale Serve 로 온 다른 기기 하나뿐이다. 이 서버는 127.0.0.1 에서만 들으니 밖에서 바로는 못 온다.
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].lower()
+        self.remote = None
+        if host in ("localhost", "127.0.0.1"):
+            return True
+        if not host.endswith(".ts.net"):
+            return False
+        # Serve 는 들어온 요청의 Tailscale-User-Login 을 지우고 자기가 확인한 계정으로 채운다. 이 PC 주인 계정일 때만
+        # 받아서, 기기를 남과 나눠 쓰게 돼도 그 사람은 못 들어온다(터미널 칸이 셸을 내주니까).
+        r = remote_info()
+        who = (self.headers.get("Tailscale-User-Login") or "").lower()
+        if r["host"] and host == r["host"] and r["login"] and who == r["login"].lower():
+            self.remote = host
+            return True
+        return False
 
     def send_json(self, obj, status=200):
         data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -629,6 +670,13 @@ class Handler(BaseHTTPRequestHandler):
         if STATIC.resolve() not in f.parents or not f.is_file():
             return self.send_error(404)
         data = f.read_bytes()
+        if self.remote and rel == "manifest.webmanifest":
+            # 노트북에 노트북 chiiOS 와 데스크톱 chiiOS 를 둘 다 앱으로 깔면 이름으로 가려야 한다.
+            m = json.loads(data.decode("utf-8"))
+            label = self.remote.split(".")[0]
+            m["name"] = f"chiiOS · {label}"
+            m["short_name"] = label
+            data = json.dumps(m, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", TYPES.get(f.suffix, "application/octet-stream"))
         self.send_header("Cache-Control", "max-age=604800" if rel.startswith(CACHED) else "no-store")
@@ -642,7 +690,8 @@ class Handler(BaseHTTPRequestHandler):
         # 셸을 내주는 길이라 출처는 여기서 홈 화면 것만 받는다. 다른 사이트의 페이지는 Origin 을 꾸밀 수 없다.
         # ttyd 의 --check-origin 은 Origin 과 Host 가 같은지를 보므로, 넘길 때는 둘 다 ttyd 자기 주소로 맞춘다.
         origin = self.headers.get("Origin", "")
-        if origin not in (f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}") \
+        mine = (f"https://{self.remote}",) if self.remote else (f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}")
+        if origin not in mine \
                 or (self.headers.get("Upgrade") or "").lower() != "websocket":
             return self.send_error(403)
         try:

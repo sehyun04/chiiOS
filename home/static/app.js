@@ -1,6 +1,9 @@
 // chiiOS 홈 화면. 5초마다 /api/state 를 받아 칸을 다시 그린다.
 const $ = (s) => document.querySelector(s);
 const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+// 다른 기기에서 Tailscale 로 연 화면이면 어느 PC 의 chiiOS 인지 상태줄에 이름을 붙인다(노트북 것과 헷갈리지 않게).
+const REMOTE = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "" : location.hostname.split(".")[0];
+if (REMOTE) document.title = `chiiOS · ${REMOTE}`;
 const ICON = {
   play: '<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>',
   moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>',
@@ -197,7 +200,7 @@ async function followUpdate(startedAt) {
 function renderBar(s) {
   const sys = s.sys;
   $("#who").textContent = `${sys.user}@${sys.host}:~`;
-  $("#up").textContent = `${sys.os} · ${span(sys.uptime)}째`;
+  $("#up").textContent = `${REMOTE ? `${REMOTE} · ` : ""}${sys.os} · ${span(sys.uptime)}째`;
   $("#mem").textContent = `${gib(sys.memUsed)} / ${gib(sys.memTotal)} GB`;
   $("#mem-fill").style.width = `${(sys.memUsed / sys.memTotal) * 100}%`;
   $("#disk").textContent = `디스크 ${gib(sys.diskUsed)} GB`;

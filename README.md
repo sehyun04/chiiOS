@@ -55,6 +55,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 | 하치와레에게 말 걸기 | 1번 칸 [하치와레] 탭, 또는 상태줄 하치와레 말풍선을 누른다 |
 | 바탕화면 | 상태줄 맨 왼쪽 chiiOS 를 누르거나 `Alt+D`. 1번 칸 자리에 Windows 바탕화면 아이콘이 같은 배치로 나오고(오른쪽 칸들은 그대로), 두 번 누르면(또는 Enter) Windows 에서 연다. `Esc` 나 같은 단추로 칸 화면으로 돌아간다 |
 | 켜면 chiiOS | 데스크톱에서 `boot.ps1` (아래 '켜면 chiiOS') |
+| 다른 기기에서 열기 | 데스크톱에서 `remote.ps1` 한 번, 노트북·폰은 Tailscale 로그인만 (아래 '다른 기기에서 열기') |
 | 제목 줄 없애기 | 처음 한 번 상태줄의 [앱으로 설치] -> Edge 설치 창의 [설치]. 아래 '앱으로 설치' |
 | 전체 화면 | 상태줄의 네모 단추나 `F11`(터미널 안에서도 된다). Windows 제목 줄과 작업 표시줄이 걷힌다. 전체 화면에서 `Esc` 는 터미널로 가고, 나가기는 `F11`·단추·`Esc` 길게 |
 | 낮·밤 바꾸기 | 상태줄 시계 옆 단추. 자동(저녁 7시~아침 7시 밤) -> 낮 -> 밤 순서로 돈다 |
@@ -82,6 +83,16 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 - Microsoft 계정이면 PIN 이 아니라 계정 비밀번호를 넣는다. 안 되면 설정 > 계정 > 로그인 옵션에서 'Windows Hello 로그인만 허용' 을 끈다.
 - 되돌리기: `boot.ps1 -Remove` (시작프로그램과 작업 표시줄을 처음 상태로), 자동 로그인은 Autologon 을 다시 열어 Disable.
 - 진짜 Debian 으로 부팅하는 길(듀얼 부팅)은 롤이 Linux 에서 안 돼서(Vanguard) 이 PC 에는 안 맞는다. 봇 전용 기계를 따로 들이면 그쪽에 Debian 을 직접 깐다.
+
+## 다른 기기에서 열기
+
+평소 작업은 노트북, 늘 켜 두는 일은 데스크톱이다. 하치와레와 할 일은 데스크톱 한 곳에 두고, 노트북·폰에서는 데스크톱 chiiOS 를 연다.
+
+- 길은 Tailscale(내 기기끼리만 이어지는 사설망)이다. 인터넷에 포트를 열지 않고, 집 밖에서도 같은 주소로 된다. 나중에 치이스페가 PC 끼리 세션을 주고받을 때도 같은 길을 쓴다.
+- 데스크톱: Tailscale 을 깔고 로그인한 뒤 `powershell -ExecutionPolicy Bypass -File remote.ps1`. Tailscale Serve 가 `https://<데스크톱 이름>.<내 망>.ts.net/` 으로 온 요청을 이 PC 의 `127.0.0.1:7682` 로 넘긴다. 처음 한 번은 Tailscale 이 이 망의 HTTPS 인증서를 켜도 되는지 묻는 주소를 띄운다. 재부팅해도 이어지고, 끄기는 `remote.ps1 -Remove`.
+- 노트북·폰: 같은 계정으로 Tailscale 에 로그인하고 그 주소를 연다. 노트북 Edge 에서 [앱으로 설치] 하면 `chiiOS · <데스크톱 이름>` 앱이 노트북 chiiOS 와 따로 생기고, 상태줄 맨 앞에 데스크톱 이름이 붙는다.
+- 홈 화면은 Serve 가 채운 `Tailscale-User-Login` 이 이 PC 주인 계정일 때만 받는다(Serve 는 들어온 요청의 이 머리글을 지우고 자기가 확인한 값으로 채운다). 이름과 계정은 Windows 의 `tailscale status --json` 에서 1분마다 읽는다. 터미널 칸이 셸을 내주는 길이라, 기기를 남과 나눠 쓰게 돼도 그 사람은 못 들어온다.
+- 다른 기기에서 연 바탕화면 아이콘을 누르면 데스크톱에서 열린다.
 
 ## 바탕화면
 
@@ -192,11 +203,11 @@ Debian 터미널(홈 화면 [터미널] 탭이나 `wsl -d Debian`)에서 홈 화
 
 ## 주의
 
-- 브라우저 터미널과 홈 화면은 `127.0.0.1` 에만 열려 있다. 셸과 봇 단추를 통째로 내주는 것이라 다른 기기에서 열려면 Tailscale 같은 인증을 먼저 둔다.
+- 브라우저 터미널과 홈 화면은 `127.0.0.1` 에만 열려 있다. 셸과 봇 단추를 통째로 내주는 것이라 다른 기기에서는 Tailscale Serve 로, 이 PC 주인 계정만 들어온다(위 '다른 기기에서 열기').
 - 하치와레 열쇠·대화·확인 단추도 같은 규칙 아래 있다. 열쇠를 넣는 요청은 POST 라 `X-Chii` 머리글 없이는 안 받는다.
 - 봇은 compose 로 띄운 컨테이너(작업 폴더 라벨이 있는 것)만 센다. compose 가 구운 이미지에는 project 라벨이 박혀 있어서, 시험 삼아 `docker run` 한 컨테이너까지 봇으로 잡혀 오늘 기록이 더러워진 적이 있다.
-- 다른 사이트가 몰래 요청하지 못하게, 홈 화면은 `localhost` 이름으로 온 요청만 받고 바꾸는 요청(POST)에는 `X-Chii: 1` 머리글을 요구한다. ttyd 는 `--check-origin` 으로 다른 출처의 웹소켓을 막는다.
-- 터미널 칸의 웹소켓(`/term/ws`)은 홈 화면 서버가 ttyd 로 바이트 그대로 잇는다. `Origin` 이 홈 화면(`http://localhost:7682`)이 아니면 403 이다. ttyd 쪽으로 넘길 때는 Origin·Host 를 ttyd 주소로 맞춰 `--check-origin` 도 그대로 통과한다.
+- 다른 사이트가 몰래 요청하지 못하게, 홈 화면은 `localhost` 이름(과 Tailscale 이 이 PC 에 붙인 이름)으로 온 요청만 받고 바꾸는 요청(POST)에는 `X-Chii: 1` 머리글을 요구한다. ttyd 는 `--check-origin` 으로 다른 출처의 웹소켓을 막는다.
+- 터미널 칸의 웹소켓(`/term/ws`)은 홈 화면 서버가 ttyd 로 바이트 그대로 잇는다. `Origin` 이 홈 화면(`http://localhost:7682`, 다른 기기에서는 `https://<이름>.ts.net`)이 아니면 403 이다. ttyd 쪽으로 넘길 때는 Origin·Host 를 ttyd 주소로 맞춰 `--check-origin` 도 그대로 통과한다.
 - 터미널 글꼴 D2Coding(OFL, 예약 이름 D2Coding)은 글리프를 건드리지 않고 woff2 로만 다시 싸서 `home/static/fonts/` 에 둔다. 보는 PC 에 글꼴이 없어도 한글 폭이 맞는다. xterm 5.5 는 `home/static/vendor/xterm/`(MIT).
 - 홈 화면이 7680 이 아니라 7682 인 이유: 7680 은 Windows 배달 최적화(DoSvc)가 쥐고 있어 Windows 쪽 `localhost:7680` 이 Debian 까지 오지 않는다.
 - 할 일과 홈 화면이 받아 적은 기록은 Debian 안 `~/.local/share/chiios/` 에 있다. 재부팅 기록은 systemd 저널에서 읽는다.
