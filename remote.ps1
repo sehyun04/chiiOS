@@ -7,6 +7,9 @@
 #   powershell -ExecutionPolicy Bypass -File remote.ps1 -Remove  끄기
 param([switch]$Remove)
 $ErrorActionPreference = 'Stop'
+# tailscale.exe 는 UTF-8 로 쓰는데 Windows PowerShell 은 콘솔 코드 페이지(949)로 읽는다. 계정 표시 이름이 한글이면
+# 따옴표까지 깨져 status --json 이 JSON 이 아니게 된다(11-19 데스크톱에서 여기서 멈췄다).
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 
 $ts = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
 if (-not (Test-Path $ts)) {
