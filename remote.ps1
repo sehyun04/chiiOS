@@ -27,10 +27,22 @@ if ($st.BackendState -ne 'Running') {
     return
 }
 
-# 처음이면 Tailscale 이 이 망에서 HTTPS 인증서를 켜도 되는지 묻는 주소를 띄운다. 그 주소에서 허락하면 이어서 진행된다.
+# Serve 는 망에 HTTPS 인증서가 켜져 있어야 한다. 꺼져 있으면 serve 가 허락 주소를 띄우고 기다리는데, 그 창을 닫으면
+# 아무것도 안 걸린 채 끝난다(11-19 데스크톱에서 주소만 찍히고 안 열렸다). 그래서 미리 알리고, 끝난 뒤 실제로 걸렸는지 본다.
+$name = "$($st.Self.DNSName)".TrimEnd('.')
+if (-not $st.CertDomains) {
+    Write-Host '이 망은 HTTPS 인증서가 아직 꺼져 있다. 곧 뜨는 허락 주소에서 켜거나,'
+    Write-Host 'https://login.tailscale.com/admin/dns 맨 아래 HTTPS Certificates 의 Enable HTTPS 를 누른다.'
+    Write-Host '(켜면 이 PC 이름이 공개 인증서 기록에 남는다. 이름만 남고 접속은 여전히 내 기기만 된다.)'
+}
 # --bg 로 걸어 두면 재부팅·재로그인 뒤에도 Tailscale 이 알아서 다시 연다.
 & $ts serve --bg 7682
-$name = "$($st.Self.DNSName)".TrimEnd('.')
+$on = $null
+try { $on = (& $ts serve status --json | ConvertFrom-Json).TCP.'443' } catch {}
 Write-Host ''
+if (-not $on) {
+    Write-Host '아직 안 걸렸다. HTTPS 인증서를 켠 뒤 이 스크립트를 다시 돌린다.'
+    return
+}
 Write-Host "다른 기기에서 열 주소: https://$name/"
 Write-Host '노트북 Edge 로 열고 상태줄 [앱으로 설치] 를 누르면 이 PC 이름이 붙은 chiiOS 앱이 따로 생긴다.'
