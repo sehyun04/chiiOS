@@ -33,6 +33,10 @@ HELP = """chii: 홈 화면과 같은 일을 터미널에서
   chii open              홈 화면을 앱 창으로 연다 (Windows)
   chii backup            지금 백업
   chii update            새 판 받아서 다시 깔기
+  chii night             하치와레 밤 작업: 켜짐·시각, 할 일 파악, 마지막 결과
+  chii night on|off [시:분]  켜기(시각을 주면 그 시각에)·끄기
+  chii night run [번호]  지금 해 보기. 번호를 주면 그 할 일을(chii todo 번호)
+  chii night triage      할 일을 지금 다시 파악
 
 <봇> 은 이름(니나브)이나 project(loa-bot), 앞부분만 써도 된다."""
 
@@ -321,6 +325,69 @@ def cmd_todo(args):
     die(f"모르는 말: chii todo {sub}. add, done, undo, rm 중 하나")
 
 
+WHO_WORD = {"hachi": "하치와레 몫", "me": "대장 몫", "risky": "위험"}
+SIZE_WORD = {1: "작음", 2: "보통", 3: "큼"}
+NIGHT_WORD = {"running": "하는 중", "done": "올려 둠", "nothing": "고친 것 없음", "failed": "못 끝냄", "none": "할 만한 일 없었음"}
+
+
+def cmd_night(args):
+    sub = args[0] if args else ""
+    if sub in ("on", "off"):
+        body = {"enabled": sub == "on"}
+        if len(args) > 1:
+            body["at"] = args[1]
+        code, s = call("POST", "/api/night/settings", body)
+        if code != 200:
+            die(f"실패 ({s.get('error', code)})")
+        print(f"  밤 작업 {'켰어 · 매일 ' + s['at'] if s['enabled'] else '껐어'}")
+        return
+    if sub == "triage":
+        call("POST", "/api/night/triage")
+        print("  하치와레가 할 일을 다시 보는 중이야. 조금 뒤 chii night 로 본다")
+        return
+    if sub == "run":
+        body = {}
+        if len(args) > 1:
+            todos = state()["todos"]
+            if not args[1].isdigit() or not 1 <= int(args[1]) <= len(todos):
+                die(f"몇 번? 1~{len(todos)} (chii todo 에 나온 번호)")
+            body["todo"] = todos[int(args[1]) - 1]["id"]
+        code, data = call("POST", "/api/night/run", body)
+        if code != 200:
+            die(data.get("error", f"실패 ({code})"))
+        print("  하치와레가 시작했어. 홈 화면 [하치와레] 탭이나 chii night 로 본다")
+        return
+    if sub:
+        die(f"모르는 말: chii night {sub}. on, off, run, triage 중 하나")
+    code, n = call("GET", "/api/night")
+    if code != 200:
+        die("홈 화면 서버에 닿지 않아")
+    print(f"  밤 작업 {bold('켜짐 · 매일 ' + n['at']) if n['enabled'] else dim('꺼짐 (chii night on)')}")
+    todos = [t for t in state()["todos"] if not t["done"]]
+    for i, t in enumerate(state()["todos"], 1):
+        if t["done"]:
+            continue
+        e = (n.get("triage") or {}).get(t["id"])
+        memo = "아직 안 봄"
+        if e and e.get("text") == t["text"]:
+            bits = [WHO_WORD.get(e["who"], e["who"])]
+            bits += [e["repo"].split("/")[1], SIZE_WORD.get(e.get("size"), "")] if e["who"] == "hachi" and e.get("repo") else [e.get("why") or ""]
+            memo = " · ".join(b for b in bits if b)
+        print(f"  {i:>2}. {t['text']}  {dim(memo)}")
+    if not todos:
+        print(dim("  남은 할 일 없음"))
+    runs = n.get("runs") or []
+    if runs:
+        r = runs[-1]
+        when = datetime.fromtimestamp(r["t"]).strftime("%m-%d %H:%M")
+        what = (r.get("todo") or {}).get("text") or ""
+        print(f"\n  마지막 밤 작업 {when} · {NIGHT_WORD.get(r['status'], r['status'])}{' · ' + what if what else ''}")
+        if r.get("branch") and r["status"] == "done":
+            print(dim(f"  {r['repo']} · {r['branch']} · 커밋 {len(r.get('commits') or [])}개"))
+        if r.get("error"):
+            print(dim(f"  {r['error']}"))
+
+
 def cmd_log(_args):
     show_events(state()["events"])
 
@@ -387,7 +454,7 @@ def cmd_names(_args):
 
 
 COMMANDS = {
-    "status": cmd_status, "bots": cmd_bots, "logs": cmd_logs, "todo": cmd_todo, "log": cmd_log,
+    "status": cmd_status, "bots": cmd_bots, "logs": cmd_logs, "todo": cmd_todo, "log": cmd_log, "night": cmd_night,
     "open": cmd_open, "backup": cmd_backup, "update": cmd_update, "_names": cmd_names,
     "wake": lambda a: cmd_act("start", a), "sleep": lambda a: cmd_act("stop", a), "bake": lambda a: cmd_act("bake", a),
 }

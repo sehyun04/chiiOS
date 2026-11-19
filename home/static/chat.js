@@ -256,6 +256,16 @@
       const todos = d.todos || [];
       add("할 일", todos.length ? `${todos.length}개 남음 · ${todos.join(", ")}` : "남은 할 일 없음");
     }
+    const nt = d.night;
+    if (nt && nt.status) {
+      add("밤 작업", {
+        done: `${nt.todo} · ${nt.repo} 에 커밋 ${nt.commits}개 올려 둠`,
+        nothing: `${nt.todo} · 고친 것 없음`,
+        failed: `${nt.todo} · 못 끝냄`,
+        none: "혼자 해 둘 만한 할 일이 없었어",
+        running: `${nt.todo} · 하는 중`,
+      }[nt.status] || "");
+    }
     const repos = d.repos || [];
     const total = repos.reduce((n, r) => n + r.commits, 0);
     if (total) {
@@ -273,6 +283,109 @@
     row.bubble.append(rows);
     if (d.note) row.bubble.append(el("p", "dim small", d.note));
   }
+
+  // 밤 작업 카드. 하치와레 대화와 따로, 홈 화면 서버(/api/state 의 night)가 쥔 결과를 대화 맨 아래에 붙인다.
+  // 합치기는 기준 브랜치(main)에 올라가는 일이라 한 번 더 묻는다.
+  let nightEl = null;
+  let nightKey = "";
+  function renderNight(n) {
+    const run = n && n.run;
+    const key = run ? JSON.stringify([run.id, run.status, run.steps, run.end, run.error]) : "";
+    if (key === nightKey && (!nightEl || nightEl.isConnected)) return;
+    nightKey = key;
+    if (nightEl) nightEl.remove();
+    nightEl = null;
+    if (!run) return;
+    const stick = nearBottom();
+    const row = botRow();
+    row.li.classList.add("brief", "night");
+    const head = el("div", "brief-head");
+    head.append(el("b", "", "밤 작업"), el("span", "dim", stamp(run.t)));
+    row.bubble.insertBefore(head, row.txt);
+    const todo = run.todo ? run.todo.text : "";
+    const word = {
+      running: `${todo} 하는 중이야. 지금 ${run.steps || 0}단계째`,
+      done: run.summary || `${todo} 해 놨어`,
+      nothing: run.summary || `${todo} 는 고친 게 없어`,
+      failed: `${todo} 는 못 끝냈어${run.error ? `. ${run.error}` : ""}`,
+      none: run.error || "혼자 해 둘 만한 할 일이 없었어",
+    }[run.status] || "";
+    row.txt.textContent = word;
+    row.txt.classList.add("pre");
+    const rows = el("dl", "brief-rows");
+    const add = (k, v) => {
+      rows.append(el("dt", "", k));
+      const dd = el("dd");
+      if (typeof v === "string") dd.textContent = v;
+      else dd.append(v);
+      rows.append(dd);
+    };
+    if (todo) add("할 일", todo);
+    if (run.repo) add("저장소", `${run.repo}${run.branch ? ` · ${run.branch}` : ""}`);
+    const commits = run.commits || [];
+    if (commits.length) {
+      const det = el("details");
+      det.append(el("summary", "", `커밋 ${commits.length}개`));
+      const ul = el("ul");
+      for (const c of commits) ul.append(el("li", "", `${c.sha} ${c.subject}`));
+      det.append(ul);
+      add("한 일", det);
+    }
+    if (run.dirty) add("남은 변경", `커밋 안 한 파일 ${run.dirty}개 (밤 작업 폴더에 남아 있음)`);
+    if (run.sessionId && run.cwd) {
+      add("이어 하기", el("code", "mono small", `cd "${run.cwd}" && claude --resume ${run.sessionId}`));
+    }
+    if (rows.childElementCount) row.bubble.append(rows);
+    const btns = el("div", "btns");
+    const say = el("span", "dim small");
+    const act = async (what, b) => {
+      for (const x of btns.querySelectorAll("button")) x.disabled = true;
+      say.textContent = what === "merge" ? "합치는 중..." : "";
+      let r = null;
+      try { r = await post(`/api/night/${run.id}/${what}`); } catch {}
+      const data = r ? await r.json().catch(() => ({})) : {};
+      if (r && r.ok) {
+        nightKey = "";
+        if (window.chiiRefresh) window.chiiRefresh();
+      } else {
+        say.textContent = data.error || "못 했어";
+        for (const x of btns.querySelectorAll("button")) x.disabled = false;
+        if (b) b.textContent = "합치기";
+      }
+    };
+    if (run.status === "done") {
+      if (run.compare) {
+        const a = el("a", "glass", "GitHub 에서 보기");
+        a.href = run.compare;
+        a.target = "_blank";
+        a.rel = "noopener";
+        btns.append(a);
+      }
+      const merge = el("button", "glass primary", "합치기");
+      const drop = el("button", "glass", "버리기");
+      merge.type = drop.type = "button";
+      let armed = false;
+      merge.onclick = () => {
+        if (!armed) {
+          armed = true;
+          merge.textContent = `${run.base || "main"} 에 올릴까? 한 번 더`;
+          return;
+        }
+        act("merge", merge);
+      };
+      drop.onclick = () => act("drop");
+      btns.append(merge, drop);
+    } else if (run.status !== "running") {
+      const ok = el("button", "glass", "알겠어");
+      ok.type = "button";
+      ok.onclick = () => act("seen");
+      btns.append(ok);
+    }
+    if (btns.childElementCount) row.bubble.append(btns, say);
+    nightEl = row.li;
+    if (stick) toBottom();
+  }
+  window.chiiNight = renderNight;
 
   function renderTurns(turns) {
     const now = Date.now() / 1000;

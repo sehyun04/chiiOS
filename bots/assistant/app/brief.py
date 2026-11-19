@@ -32,6 +32,9 @@ def collect(since):
     trouble = [e["text"] for e in events if e.get("kind") in ("crash", "bakefail")]
     todos = [t["text"] for t in st.get("todos") or [] if not t["done"]]
     repos, note = work.recent_work(since)
+    run = (st.get("night") or {}).get("run") or {}
+    night = {"todo": (run.get("todo") or {}).get("text") or "", "status": run.get("status"),
+             "commits": len(run.get("commits") or []), "repo": run.get("repo"), "error": run.get("error")} if run else None
     return {
         "t": now,
         "since": since,
@@ -47,6 +50,7 @@ def collect(since):
             "ahead": r["ahead"] or 0,
         } for r in repos],
         "note": note,
+        "night": night,
     }
 
 
@@ -59,6 +63,13 @@ def facts(d):
         bots = ", ".join(f"{b['name']} {b['status']}" for b in d["bots"]) or "올린 봇 없음"
         lines.append(f"- 봇: {bots}. " + (f"그동안 문제: {'; '.join(d['trouble'])}" if d["trouble"] else "그동안 쓰러진 봇 없음"))
         lines.append(f"- 할 일 {len(d['todos'])}개 남음" + (": " + ", ".join(d["todos"]) if d["todos"] else ""))
+    n = d.get("night")
+    if n:
+        word = {"done": f"{n['todo']} 해서 {n['repo']} 에 커밋 {n['commits']}개 올려 둠(합칠지 대장이 정함)",
+                "nothing": f"{n['todo']} 봤지만 고친 것 없음", "failed": f"{n['todo']} 못 끝냄 ({n.get('error') or ''})",
+                "none": "혼자 해 둘 만한 할 일이 없었음", "running": f"{n['todo']} 하는 중"}.get(n["status"], "")
+        if word:
+            lines.append(f"- 하치와레 밤 작업: {word}")
     total = sum(r["commits"] for r in d["repos"])
     if total:
         per = ", ".join(f"{r['name']} {r['commits']}" for r in d["repos"] if r["commits"])

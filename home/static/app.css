@@ -342,6 +342,16 @@ button { font: inherit; color: inherit; }
 #todos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-width: calc(100% - 120px); position: relative; z-index: 1; }
 #todos li { display: flex; align-items: center; gap: 10px; font-size: 15px; }
 #todos li.done span { color: var(--ink-3); text-decoration: line-through; }
+.todo-text { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; }
+/* 하치와레 메모. 할 일 글씨보다 한참 작게, 색은 누구 몫인지만 알린다. */
+.who { border: 0; padding: 0; background: none; font: inherit; font-size: 11.5px; line-height: 1.4; color: var(--ink-3); text-align: left; cursor: pointer; }
+.who:hover { color: var(--ink); }
+.who.hachi { color: var(--sky-ink); }
+.who.risky { color: var(--red-ink); }
+.who.fixed::after { content: " (고침)"; }
+.who.busy, .who.wait { cursor: default; color: var(--sky-ink); }
+.who:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; border-radius: 4px; }
+.night-toggle[aria-pressed="true"] { color: var(--sky-ink); }
 .todo-check {
   width: 16px; height: 16px; padding: 0; flex: none;
   display: grid; place-items: center;
@@ -368,6 +378,7 @@ li.done .todo-check svg { display: block; }
 .log li.down i, .log li.crash i, .log li.bakefail i { background: var(--red); }
 .log li.bake i { background: var(--cocoa); }
 .log li.todo i { background: var(--sky); }
+.log li.night i { background: var(--sky-ink); }
 
 /* 상태줄 */
 .bar { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
@@ -500,3 +511,9 @@ dialog .btns:empty { display: none; }
   .desk > .side { grid-row: 2; grid-column: 1; }
   .desk > .bar { grid-row: 3; }
 }
+
+/* 밤 작업 카드: 아침 보고 카드와 같은 틀에, 하치와레 보고 줄은 줄바꿈 그대로. */
+.msg.night .txt.pre { white-space: pre-wrap; }
+.msg.night .btns { margin-top: 12px; gap: 8px; }
+.msg.night code { font-size: 12px; overflow-wrap: anywhere; color: var(--ink-2); }
+a.glass { text-decoration: none; display: inline-flex; align-items: center; }

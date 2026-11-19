@@ -17,6 +17,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from night import Night
+
 HERE = Path(__file__).resolve().parent
 STATIC = HERE / "static"
 BOTS_DIR = Path(os.environ.get("CHII_BOTS_DIR", str(HERE.parent / "bots")))
@@ -241,6 +243,10 @@ def visible_todos():
     return [t for t in load_todos() if not t.get("done") or (t.get("doneAt") or 0) >= since]
 
 
+# 하치와레 밤 작업(night.py). 할 일을 읽고, 할 일이 바뀌면 다시 파악한다.
+NIGHT = Night(STATE_DIR, lambda kind, text: log_event(kind, text), lambda: load_todos())
+
+
 def add_todo(text):
     text = str(text or "").strip()[:200]
     if not text:
@@ -250,6 +256,7 @@ def add_todo(text):
         items = load_todos()
         items.append(item)
         save_todos(items)
+    NIGHT.touch()
     return item
 
 
@@ -273,6 +280,8 @@ def change_todo(tid, op, done=None):
             break
         if found:
             save_todos(items)
+    if found:
+        NIGHT.touch()
     if finished:
         log_event("todo", f"할 일 끝 · {finished}")
     return found
@@ -625,6 +634,7 @@ class Handler(BaseHTTPRequestHandler):
                 "services": services(),
                 "bots": bots(),
                 "todos": visible_todos(),
+                "night": NIGHT.view(),
                 "events": events(),
                 "termPort": TERM_PORT,
                 "update": {"enabled": update["enabled"], "count": len(update["commits"]),
@@ -641,6 +651,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.assistant("GET", "/status")
         if u.path == "/api/update":
             return self.send_json({**update, "progress": update_progress()})
+        if u.path == "/api/night":
+            return self.send_json({**NIGHT.view(), "settings": NIGHT.settings(), "runs": NIGHT.runs()[-10:]})
         if u.path == "/api/desktop":
             lay = desktop_layout()
             if not lay:
@@ -761,6 +773,23 @@ class Handler(BaseHTTPRequestHandler):
             ok = desktop_open(str(data.get("id", "")))
             return self.send_json({"ok": ok}, 200 if ok else 404)
 
+        if u.path == "/api/night/run":
+            ok = NIGHT.start(str(data.get("todo") or "") or None)
+            return self.send_json({"ok": True} if ok else {"error": "하치와레가 지금 다른 일을 하는 중이야"}, 200 if ok else 409)
+        if u.path == "/api/night/triage":
+            threading.Thread(target=NIGHT.triage, kwargs={"force": True}, daemon=True).start()
+            return self.send_json({"ok": True})
+        if u.path == "/api/night/settings":
+            return self.send_json(NIGHT.set_settings(data))
+        m = re.fullmatch(r"/api/night/who/(\w+)", u.path)
+        if m:
+            e = NIGHT.set_who(m.group(1), str(data.get("who") or ""))
+            return self.send_json(e if e else {"error": "그 할 일은 아직 파악 전이거나 저장소를 몰라"}, 200 if e else 409)
+        m = re.fullmatch(r"/api/night/([\w-]+)/(merge|drop|seen)", u.path)
+        if m:
+            run, err = NIGHT.resolve(m.group(1), m.group(2))
+            return self.send_json({"ok": True, "run": run} if run else {"error": err}, 200 if run else 409)
+
         if u.path == "/api/update/check":
             return self.send_json(check_update())
         if u.path == "/api/update":
@@ -813,6 +842,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     threading.Thread(target=watch_docker, daemon=True).start()
     threading.Thread(target=watch_update, daemon=True).start()
+    threading.Thread(target=NIGHT.watch, daemon=True).start()
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
 

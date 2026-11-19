@@ -102,15 +102,42 @@ function renderBots(bots, services) {
     `<div class="chips" style="margin-top:14px">${chip(services.docker, "Docker")}${chip(services.term, "브라우저 터미널")}</div>`;
 }
 
-function renderTodos(todos) {
+// 하치와레가 할 일마다 붙인 메모. 누르면 하치와레 몫 -> 대장 몫 -> 위험 차례로 고친다(내용이 그대로인 동안 지킨다).
+const WHO_WORD = { hachi: "하치와레 몫", me: "대장 몫", risky: "위험" };
+const SIZE_WORD = { 1: "작음", 2: "보통", 3: "큼" };
+function whoChip(t, night) {
+  if (t.done || !night) return "";
+  const run = night.run;
+  if (run && run.status === "running" && run.todo && run.todo.id === t.id) {
+    return `<span class="who busy">하치와레가 하는 중 · ${run.steps || 0}단계째</span>`;
+  }
+  const e = (night.triage || {})[t.id];
+  if (!e || e.text !== t.text) return night.enabled && night.triaging ? '<span class="who wait">하치와레가 보는 중</span>' : "";
+  const repo = e.repo ? e.repo.split("/")[1] : "";
+  const bits = e.who === "hachi" ? [repo, SIZE_WORD[e.size]] : [e.why];
+  const tip = [e.why, e.plan].filter(Boolean).join(" · ");
+  return `<button class="who ${esc(e.who)}${e.who !== e.auto ? " fixed" : ""}" data-who="${esc(t.id)}" data-cur="${esc(e.who)}"
+    title="${esc(tip)} (누르면 고친다)">${esc([WHO_WORD[e.who], ...bits.filter(Boolean)].join(" · "))}</button>`;
+}
+
+function renderTodos(todos, night) {
   const done = todos.filter((t) => t.done).length;
   $("#todo-count").textContent = `${done} / ${todos.length}`;
   $("#todo-fill").style.width = todos.length ? `${(done / todos.length) * 100}%` : "0";
   $("#todos").innerHTML = todos.map((t) => `<li class="${t.done ? "done" : ""}">
       <button class="todo-check" data-id="${esc(t.id)}" aria-pressed="${t.done}" aria-label="${t.done ? "안 한 걸로" : "끝낸 걸로"}">${ICON.check}</button>
-      <span>${esc(t.text)}</span>
+      <span class="todo-text"><span>${esc(t.text)}</span>${whoChip(t, night)}</span>
       <button class="todo-del" data-del="${esc(t.id)}" aria-label="지우기">${ICON.x}</button>
     </li>`).join("");
+  const tg = $("#night-toggle");
+  tg.hidden = !night;
+  if (night) {
+    tg.setAttribute("aria-pressed", String(night.enabled));
+    $("#night-label").textContent = night.enabled ? `밤 작업 ${night.at}` : "밤 작업 꺼짐";
+    tg.title = night.enabled
+      ? `${night.at} 에 하치와레가 할 일을 파악하고, 혼자 해 둘 수 있는 가장 작은 일 하나를 미리 해 둔다. 누르면 끈다`
+      : "누르면 켠다. 이 PC 의 Claude Code 로 밤에 할 일 하나를 미리 해 둔다";
+  }
 }
 
 let lastEventCount = -1;
@@ -210,7 +237,9 @@ function renderBar(s) {
   let say;
   let seen = 0;
   try { seen = Number(localStorage.getItem("chii-brief-seen") || 0); } catch {}
+  const night = s.night && s.night.run;
   if (down) say = `대장, ${josa(down.name, "이", "가")} 쓰러졌어`;
+  else if (night && night.status === "done") say = "대장, 밤에 할 일 하나 해 놨어";
   else if (window.chiiBrief && window.chiiBrief > seen) say = "대장, 아침 보고 왔어";
   else if (left) say = `대장, 할 일 ${left}개 남았어~`;
   else if (s.todos.length) say = "대장, 오늘 할 일 다 했어!";
@@ -275,7 +304,8 @@ async function refresh() {
     return;
   }
   renderBots(state.bots, state.services);
-  renderTodos(state.todos);
+  renderTodos(state.todos, state.night);
+  if (window.chiiNight) window.chiiNight(state.night);
   renderEvents(state.events);
   renderBar(state);
   renderUpdate(state.update);
@@ -331,10 +361,28 @@ $("#bots").addEventListener("click", (e) => {
 $("#todos").addEventListener("click", async (e) => {
   const check = e.target.closest(".todo-check");
   const del = e.target.closest(".todo-del");
+  const who = e.target.closest(".who[data-who]");
+  if (who) {
+    // 저장소를 모르는 할 일은 하치와레 몫이 될 수 없어 서버가 거절한다. 그때는 그다음 차례로 넘긴다.
+    const order = ["hachi", "me", "risky"];
+    let i = order.indexOf(who.dataset.cur);
+    for (let n = 0; n < 2; n++) {
+      i = (i + 1) % order.length;
+      if ((await post(`/api/night/who/${who.dataset.who}`, { who: order[i] })).status === 200) break;
+    }
+    await refresh();
+    return;
+  }
   if (check) await post(`/api/todos/${check.dataset.id}/toggle`);
   else if (del) await post(`/api/todos/${del.dataset.del}/delete`);
   else return;
   refresh();
+});
+
+$("#night-toggle").addEventListener("click", async () => {
+  const on = $("#night-toggle").getAttribute("aria-pressed") === "true";
+  await post("/api/night/settings", { enabled: !on });
+  await refresh();
 });
 
 $("#todo-form").addEventListener("submit", async (e) => {

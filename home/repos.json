@@ -1,0 +1,36 @@
+{
+ "about": "하치와레 밤 작업이 할 일을 저장소에 잇는 표(home/night.py). 대장 것만 둔다. night 가 false 면 밤에 손대지 않는다.",
+ "repos": [
+  {
+   "slug": "sehyun04/chiiOS",
+   "names": ["chiiOS", "치이OS", "치이os", "하치와레", "비서 봇", "홈 화면", "chii 명령", "밤 작업", "오늘 할 일"],
+   "about": "봇 돌리는 Debian(WSL) 환경. 홈 화면(Python 서버와 웹 화면), chii 명령, 하치와레 비서 봇(bots/assistant), Windows 쪽 PowerShell 스크립트"
+  },
+  {
+   "slug": "sehyun04/chiispace",
+   "names": ["치이스페", "chiispace", "kasaspace", "폰 연결", "폰 화면", "세션 이사", "서브에이전트"],
+   "about": "Claude Code·Codex 칸 나누기 Windows 앱(Tauri, Rust + TypeScript). 터미널 칸·대화창 칸, 폰 연결"
+  },
+  {
+   "slug": "sehyun04/hachibongo",
+   "names": ["하치봉고", "hachibongo", "봉고캣", "하치와레 오버레이"],
+   "about": "키보드·마우스 입력을 따라 치는 하치와레 오버레이(Tauri 2)"
+  },
+  {
+   "slug": "sehyun04/loa-bot",
+   "names": ["니나브", "loa-bot", "로아봇", "로스트아크 봇"],
+   "about": "로스트아크 디스코드 봇. Oracle 에서 운영 중이라 코드만 고치고 실행·배포·토큰 사용은 하지 않는다"
+  },
+  {
+   "slug": "sehyun04/gemnave",
+   "names": ["젬나브", "gemnave"],
+   "about": "로스트아크 젬 가공 계산과 화면 인식 웹"
+  },
+  {
+   "slug": "sehyun04/Sehyun-portfolio",
+   "names": ["포트폴리오", "portfolio", "sehyuni.com"],
+   "about": "포트폴리오 사이트. 지원서로 제출된 페이지가 있다",
+   "night": false
+  }
+ ]
+}
