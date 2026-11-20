@@ -234,16 +234,25 @@ class Night:
                     ev = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(ev, dict):
-                    if ev.get("type") == "result":
-                        last = ev
-                    if on_event:
-                        on_event(ev)
+                # json 출력은 판에 따라 결과 하나가 아니라 사건 전체의 배열로 온다(2.1.328 실측). 둘 다 받는다.
+                for x in ev if isinstance(ev, list) else [ev]:
+                    if isinstance(x, dict):
+                        if x.get("type") == "result":
+                            last = x
+                        if on_event:
+                            on_event(x)
             p.wait()
         finally:
             timer.cancel()
             if logf:
                 logf.close()
+        if last is None:
+            try:
+                whole = json.loads("\n".join(out))
+                last = next((x for x in (whole if isinstance(whole, list) else [whole])
+                             if isinstance(x, dict) and x.get("type") == "result"), None)
+            except ValueError:
+                pass
         return p.returncode, last, bool(killed), "\n".join(out[-20:])
 
     # 파악 ------------------------------------------------------------------
@@ -282,7 +291,7 @@ class Night:
             try:
                 items = json.loads(text[text.index("["):text.rindex("]") + 1])
             except ValueError:
-                self.log_event("night", "하치와레 할 일 파악 실패")
+                self.log_event("night", "하치와레 할 일 파악 실패 · 답을 못 읽음")
                 return False
             slugs = {r["slug"].lower(): r for r in cat}
             now = time.time()

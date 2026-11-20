@@ -114,7 +114,8 @@ function whoChip(t, night) {
   const e = (night.triage || {})[t.id];
   if (!e || e.text !== t.text) return night.enabled && night.triaging ? '<span class="who wait">하치와레가 보는 중</span>' : "";
   const repo = e.repo ? e.repo.split("/")[1] : "";
-  const bits = e.who === "hachi" ? [repo, SIZE_WORD[e.size]] : [e.why];
+  // 대장이 고친 몫에는 하치와레가 처음 붙인 까닭이 맞지 않으니 빼고 보인다.
+  const bits = e.who === "hachi" ? [repo, SIZE_WORD[e.size]] : e.who === e.auto ? [e.why] : [];
   const tip = [e.why, e.plan].filter(Boolean).join(" · ");
   return `<button class="who ${esc(e.who)}${e.who !== e.auto ? " fixed" : ""}" data-who="${esc(t.id)}" data-cur="${esc(e.who)}"
     title="${esc(tip)} (누르면 고친다)">${esc([WHO_WORD[e.who], ...bits.filter(Boolean)].join(" · "))}</button>`;

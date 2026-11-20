@@ -189,11 +189,12 @@ unset -f chii_summary
 _chii() {
   local cur=${COMP_WORDS[COMP_CWORD]}
   if (( COMP_CWORD == 1 )); then
-    COMPREPLY=($(compgen -W "status bots wake sleep bake logs todo log open backup update help" -- "$cur"))
+    COMPREPLY=($(compgen -W "status bots wake sleep bake logs todo log night open backup update help" -- "$cur"))
   elif (( COMP_CWORD == 2 )); then
     case ${COMP_WORDS[1]} in
       wake|sleep|bake|logs) COMPREPLY=($(compgen -W "$(chii _names 2>/dev/null)" -- "$cur")) ;;
       todo) COMPREPLY=($(compgen -W "add done undo rm" -- "$cur")) ;;
+      night) COMPREPLY=($(compgen -W "on off run triage" -- "$cur")) ;;
     esac
   fi
 }
