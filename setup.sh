@@ -57,8 +57,32 @@ EOF
   # 안 할 때가 있다(데스크톱 11-20: 인터넷은 되는데 이름만 안 풀려 이미지 굽기가 멈췄다. 같은 날 노트북은 멀쩡).
   # 상시 봇 PC 가 그 운에 기대지 않게 공용 DNS 를 직접 쓴다. Windows 11 의 dnsTunneling 은 Windows 10 에 없다.
   # /etc/resolv.conf 는 WSL 이 걸어 둔 링크(/mnt/wsl/resolv.conf, 다른 배포판과 같이 씀)라 따라가 쓰지 않고 바꿔 끼운다.
-  printf '# chiiOS setup.sh: WSL 의 DNS 중계 대신 공용 DNS\nnameserver 1.1.1.1\nnameserver 8.8.8.8\noptions timeout:2\n' > /etc/resolv.conf.chii
-  mv -f /etc/resolv.conf.chii /etc/resolv.conf
+  cat > /usr/local/sbin/chii-dns <<'EOF'
+#!/bin/sh
+printf '# chiiOS chii-dns: WSL 의 DNS 중계 대신 공용 DNS\nnameserver 1.1.1.1\nnameserver 8.8.8.8\noptions timeout:2\n' > /etc/resolv.conf.chii
+mv -f /etc/resolv.conf.chii /etc/resolv.conf
+EOF
+  chmod 755 /usr/local/sbin/chii-dns
+  # 켤 때마다 다시 적는다. generateResolvConf 는 Debian 이 켜질 때만 읽혀서, 이번에 켜진 동안엔 Windows 에서 wsl.exe 를
+  # 새로 부를 때마다(자동 켜기 작업이 5분마다 부른다) WSL 이 링크를 되살린다. 그 링크가 남은 채 다시 켜지면
+  # 가리킬 파일을 아무도 안 만들어 이름이 아예 안 풀리니, 켜질 때 바로잡는다.
+  cat > /etc/systemd/system/chii-dns.service <<'EOF'
+[Unit]
+Description=chiiOS DNS (WSL 중계 대신 공용 DNS)
+DefaultDependencies=no
+After=local-fs.target
+Before=network.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/chii-dns
+
+[Install]
+WantedBy=sysinit.target
+EOF
+  systemctl daemon-reload
+  systemctl enable -q chii-dns.service
+  /usr/local/sbin/chii-dns
 else
   step "호스트 이름"
   hostnamectl set-hostname "$CHII_HOST"

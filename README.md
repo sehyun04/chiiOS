@@ -40,7 +40,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 2. `wslconfig` 를 `%USERPROFILE%\.wslconfig` 로 복사한다. 이미 다른 내용이 있으면 덮어쓰지 않고 멈춘다(`-Force` 면 백업 후 덮어쓰기). 사용자 폴더에 내 계정으로 못 쓰는 PC 면(i7 데스크톱이 그랬다) 같은 복사를 관리자 권한으로 다시 한다(UAC 창).
 3. Debian 이 없으면 `wsl --install -d Debian --no-launch` 로 깐다.
 4. Debian 안에서 root 로 `setup.sh` 를 돌린다. `/etc/wsl.conf` 가 바뀌었으면 Debian 을 껐다 켜서 기본 사용자·호스트 이름을 적용한다.
-   DNS 는 WSL 의 중계(Windows 10 에선 부팅에 따라 답을 안 할 때가 있다) 대신 1.1.1.1 · 8.8.8.8 을 직접 쓴다. 이건 껐다 켜지 않아도 바로 먹는다.
+   DNS 는 WSL 의 중계(Windows 10 에선 부팅에 따라 답을 안 할 때가 있다) 대신 1.1.1.1 · 8.8.8.8 을 직접 쓴다. 적는 건 바로 되지만, 처음 깐 뒤 한 번 껐다 켜기 전까지는 Windows 에서 `wsl.exe` 를 새로 부를 때마다 WSL 이 원래 것으로 되돌린다. 켤 때마다 `chii-dns` 서비스가 다시 적는다.
 5. `autostart.ps1` 로 자동 켜기 작업을 건다.
 6. `shortcut.ps1` 로 바탕화면과 시작 메뉴에 `chiiOS` 바로가기를 만든다.
 7. systemd, 사용자, docker·chii-term·chii-home, 브라우저 터미널과 홈 화면 응답을 확인한다.
