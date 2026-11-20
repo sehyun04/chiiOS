@@ -50,7 +50,15 @@ default=$CHII_USER
 
 [network]
 hostname=$CHII_HOST
+generateResolvConf=false
 EOF
+
+  # Windows 10 의 WSL(NAT)은 이름을 Windows 쪽 DNS 중계(기본 길목 주소)에 묻는데, 이 중계가 부팅에 따라 아예 답을
+  # 안 할 때가 있다(데스크톱 11-20: 인터넷은 되는데 이름만 안 풀려 이미지 굽기가 멈췄다. 같은 날 노트북은 멀쩡).
+  # 상시 봇 PC 가 그 운에 기대지 않게 공용 DNS 를 직접 쓴다. Windows 11 의 dnsTunneling 은 Windows 10 에 없다.
+  # /etc/resolv.conf 는 WSL 이 걸어 둔 링크(/mnt/wsl/resolv.conf, 다른 배포판과 같이 씀)라 따라가 쓰지 않고 바꿔 끼운다.
+  printf '# chiiOS setup.sh: WSL 의 DNS 중계 대신 공용 DNS\nnameserver 1.1.1.1\nnameserver 8.8.8.8\noptions timeout:2\n' > /etc/resolv.conf.chii
+  mv -f /etc/resolv.conf.chii /etc/resolv.conf
 else
   step "호스트 이름"
   hostnamectl set-hostname "$CHII_HOST"
