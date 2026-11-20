@@ -476,6 +476,9 @@ class Night:
                     run["error"] = "그 할 일은 어느 저장소 일인지 몰라서 못 했어"
                 self._save_run(run)
                 self.log_event("night", "하치와레 밤 작업 · " + (run.get("error") or "혼자 해 둘 만한 할 일이 없었어"))
+                # 할 일이 그대로면 파악도 Claude 를 안 불러서, 일이 없는 밤엔 5시간 창이 이 시각에 안 열린다.
+                if reason == "night":
+                    self.wake()
                 return True
             self.run_task(*got, reason)
             return True
