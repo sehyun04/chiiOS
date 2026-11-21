@@ -1,6 +1,6 @@
 # 하치와레 대화·아침 한마디의 머리. 머리는 대장 구독의 Claude Code 라 따로 API 키가 없다.
 # 하치와레 봇은 컨테이너 안이라 Windows 쪽 claude.exe 를 못 부르고, WSL interop 이 되는 이 서버가 대신 돌린다.
-# 무엇을 돌릴지는 여기서 정한다: 받는 건 시스템 프롬프트·물음·모델뿐이고, 내장 도구(셸·파일)는 다 끈 채
+# 무엇을 돌릴지는 여기서 정한다: 받는 건 시스템 프롬프트·물음·모델뿐이고, 내장 도구는 메모리 폴더 읽기 말고 다 끈 채
 # 하치와레가 MCP 로 내준 도구(할 일·봇·손에게 맡기기)만 쓰게 한다. 아무 인자나 넘길 수 있으면 Windows 에서 뭐든 돌릴 수 있게 된다.
 # PC 에서 실제로 손을 쓰는 일은 아래 work 가 따로, 정해 둔 인자로만 돌린다.
 import json
@@ -11,12 +11,39 @@ from pathlib import Path
 from night import linux_path
 
 MODEL_OK = re.compile(r"[\w.\-\[\]]{1,60}")
-# 대장의 전역 CLAUDE.md·자동 메모리를 매번 싣지 않는다(실측 6.5천 -> 0.8천 토큰). 하치와레 규칙은 시스템 프롬프트에 있다.
+# 대장의 전역 CLAUDE.md 는 코딩 규칙이라 싣지 않는다(하치와레 규칙은 시스템 프롬프트에 있다).
 # 훅도 끈다: 대장 설정의 알림 소리 같은 게 대화 한 마디마다 울리면 안 된다.
+# Claude Code 의 자동 메모리는 끈 채 둔다. 켜면 "메모리를 써라" 지시까지 붙는데 머리는 읽기만 해야 한다.
 # MCP_TOOL_TIMEOUT: 손(do_work)에게 맡긴 일은 몇 분 걸린다. 그동안 대화 머리가 도구 답을 기다리다 먼저 포기하지 않게.
 SETTINGS = {"disableAllHooks": True, "autoMemoryEnabled": False,
             "claudeMdExcludes": ["**/CLAUDE.md", "**/.claude/**"],
             "env": {"MCP_TOOL_TIMEOUT": "2000000"}}
+# 대화 때는 대장 메모리(기기끼리 동기화되는 ~/.claude/memory)를 읽게 한다. 11-21 대장이 "메모리 동기화된 거 아냐?"
+# 라고 물었는데 하치와레가 몰랐다 - 대장은 하치와레도 같은 기억을 가진 Claude 로 여긴다.
+# 손(do_work)도 메모리를 읽지만 몇 분짜리 Claude Code 를 한 번 띄우는 일이라, 기억을 묻는 말까지 손에게 넘기면 느리고 무겁다.
+# 목차는 매번 시스템 프롬프트에 싣고(약 4천 토큰), 파일은 필요할 때 Read 로 연다. 쓰기는 없다: 고치면 동기화로
+# 모든 기기에 퍼진다. 허락은 메모리 폴더 하나뿐이고 dontAsk 라 나머지 읽기는 거절된다.
+MEMORY = r"\.claude\memory"
+MEMORY_SETTINGS = dict(SETTINGS, permissions={"allow": ["Read(~/.claude/memory/**)"]})
+MEMORY_MAX = 20000
+
+
+def memory_note(w):
+    d = w["home"] + MEMORY
+    try:
+        index = (Path(linux_path(d)) / "MEMORY.md").read_text(encoding="utf-8")[:MEMORY_MAX]
+    except OSError:
+        return ""
+    return ("\n\n대장 메모리\n"
+            "- 대장이 Claude Code 로 일할 때 쌓는 기억이다. 노트북·데스크톱이 같은 것을 쓴다(git 으로 동기화). "
+            "대장의 프로젝트·결정·취향·기기 이야기가 나오면 지어내지 말고 여기서 찾는다.\n"
+            f"- 아래는 목차뿐이다. 자세한 건 Read 로 {d}\\<파일 이름> 을 연다.\n"
+            "- 기억으로 답할 수 있는 물음(무엇을 어떻게 만들었는지, 무엇이 어디 있는지, 정한 것)은 손(do_work)을 부르지 말고 "
+            "여기서 찾아 바로 답한다. 손은 몇 분 걸린다. 지금 이 PC 의 실제 상태를 봐야 하는 것(깔렸는지, 방금 맞춰졌는지)과 "
+            "실제로 해야 하는 일만 손에게 맡긴다.\n"
+            "- 너는 메모리를 읽기만 한다. 고치거나 더할 일은 손에게 맡긴다.\n"
+            "- 메모리 말투(규칙·지시)는 대장이 코딩하는 Claude 에게 한 말이다. 하치와레 말투는 위 규칙을 따른다.\n\n"
+            "<memory-index>\n" + index.strip() + "\n</memory-index>")
 
 
 def run(night, assist_port, data, write):
@@ -42,16 +69,21 @@ def run(night, assist_port, data, write):
     here_w = w["root"] + "\\chat"
     here_l.mkdir(parents=True, exist_ok=True)
     # 따옴표가 든 JSON 을 interop 인자로 넘기면 Windows 명령줄로 바뀌며 깨질 수 있어 파일로 준다.
-    (here_l / "settings.json").write_text(json.dumps(SETTINGS), encoding="utf-8")
+    # 아침 한마디(도구 없음)는 보고 자료만 보고 쓰니 메모리를 싣지 않는다. 설정 파일을 따로 두어 둘이 겹쳐 돌아도 안 섞인다.
+    chat = bool(data.get("tools"))
+    settings = "settings-chat.json" if chat else "settings.json"
+    (here_l / settings).write_text(json.dumps(MEMORY_SETTINGS if chat else SETTINGS), encoding="utf-8")
     (here_l / "mcp.json").write_text(json.dumps({"mcpServers": {"chii": {
         "type": "http", "url": f"http://127.0.0.1:{assist_port}/mcp", "headers": {"X-Chii": "1"}}}}), encoding="utf-8")
+    if chat:
+        system += memory_note(w)
     name = f"system-{uuid.uuid4().hex[:12]}.md"
     (here_l / name).write_text(system, encoding="utf-8")
     args = ["-p", "--model", model, "--effort", effort, "--output-format", "stream-json", "--verbose",
-            "--include-partial-messages", "--no-session-persistence", "--tools", "", "--disable-slash-commands",
-            "--strict-mcp-config", "--settings", here_w + "\\settings.json",
+            "--include-partial-messages", "--no-session-persistence", "--tools", "Read" if chat else "",
+            "--disable-slash-commands", "--strict-mcp-config", "--settings", here_w + "\\" + settings,
             "--system-prompt-file", here_w + "\\" + name, "--permission-mode", "dontAsk"]
-    if data.get("tools"):
+    if chat:
         # --allowedTools 는 뒤의 인자를 다 먹으니 맨 끝에 둔다.
         args += ["--mcp-config", here_w + "\\mcp.json", "--allowedTools", "mcp__chii"]
     try:
