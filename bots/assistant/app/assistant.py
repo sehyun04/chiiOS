@@ -1,5 +1,7 @@
 # chiiOS 비서 봇의 머리. 대장과 이야기하고, 할 일·봇·기록은 홈 화면 서버에 부탁해서 만진다.
-# 머리는 Anthropic API(비서 전용 키). 대화와 열쇠는 이 봇의 데이터 폴더(/data)에만 둔다.
+# 머리는 대장 구독의 Claude Code(Windows 쪽 claude -p)다. 컨테이너에선 못 부르니 홈 화면 서버(/api/claude)가 대신 돌리고,
+# 그 Claude 는 이 봇이 MCP(main.py 의 /mcp)로 내준 도구만 쓴다. 대화는 이 봇의 데이터 폴더(/data)에만 둔다.
+import http.client
 import json
 import os
 import re
@@ -9,20 +11,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import anthropic
-
 import brief
 import home
 import work
 
-# 평소 일(할 일 넣기, 상태 묻기)은 가볍고 싼 모델로 충분하다. 바꾸려면 compose.yaml 환경 변수로.
-MODEL = os.environ.get("ASSIST_MODEL", "claude-haiku-5-5")
+# 평소 일(할 일 넣기, 상태 묻기)은 가볍고 한도를 덜 쓰는 모델로 충분하다. Claude Code 의 모델 이름(haiku·sonnet·opus 또는 전체 이름).
+MODEL = os.environ.get("ASSIST_MODEL", "haiku")
 EFFORT = os.environ.get("ASSIST_EFFORT", "low")
 SELF = "assistant"
-# 대화가 길어질수록 매번 보내는 양이 늘어 값이 오른다. 최근 것만 기억한다.
+# 대화가 길어질수록 매번 보내는 양이 늘어 한도를 더 쓴다. 최근 것만 기억한다.
 HISTORY_TURNS = 20
-# 도구를 부르고 결과를 읽는 왕복의 상한. 넘으면 끊고 그때까지 한 것만 말한다.
-MAX_STEPS = 6
+# 한 번 답하는 동안 부를 수 있는 도구 수. 넘으면 도구가 거절하고, 그때까지 한 것만 말하게 된다.
+MAX_TOOL_CALLS = 8
 # 아침 보고 시각(지역 시각). 그 시각에 PC 가 꺼져 있었으면 켜진 뒤 처음 1분 안에 한다.
 BRIEF_AT = os.environ.get("ASSIST_BRIEF_AT", "08:00")
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
@@ -116,9 +116,7 @@ TOOLS = [
         },
     },
 ]
-# 스트리밍 중에 도구 입력도 생기는 대로 받는다. 대신 서버가 입력을 검사해 주지 않으므로 run_tool 에서 직접 본다.
-for _t in TOOLS:
-    _t["eager_input_streaming"] = True
+# MCP 로 오는 입력은 스키마 검사를 거쳤다고 믿지 않는다. run_tool 이 하나씩 직접 본다.
 
 
 def span(sec):
@@ -153,44 +151,15 @@ def say(line):
 class Assistant:
     def __init__(self, data_dir):
         data = Path(data_dir)
-        self.key_file = data / "anthropic-key"
         self.chat_file = data / "chat.jsonl"
         self.archive = data / "chat-archive"
         self.brief_file = data / "brief-last.json"
         self.busy = threading.Lock()
         self.file_lock = threading.Lock()
         self.brief_lock = threading.Lock()
-
-    # 열쇠 ---------------------------------------------------------------
-
-    def read_key(self):
-        try:
-            return self.key_file.read_text(encoding="utf-8").strip() or None
-        except OSError:
-            return None
-
-    def save_key(self, key):
-        key = str(key or "").strip()
-        if not key.startswith("sk-ant-") or len(key) < 30 or any(c.isspace() for c in key):
-            return False, "열쇠 모양이 아니야. sk-ant- 로 시작하는 API 키를 통째로 넣어 줘."
-        # 저장하기 전에 한 번 맞춰 본다. 모델 정보 읽기는 토큰을 쓰지 않는다.
-        try:
-            anthropic.Anthropic(api_key=key, timeout=15.0, max_retries=1).models.retrieve(MODEL)
-        except anthropic.AuthenticationError:
-            return False, "열쇠가 안 맞아. 지운 키거나 잘못 복사한 것 같아."
-        except anthropic.PermissionDeniedError:
-            return False, f"이 열쇠로는 {MODEL} 을 못 써. 키의 작업 공간 설정을 봐 줘."
-        except anthropic.APIConnectionError:
-            return False, "Anthropic 에 안 닿아. 인터넷을 봐 줘."
-        except anthropic.APIStatusError as e:
-            return False, f"맞춰 보다 막혔어 ({e.status_code})."
-        # 처음부터 600 으로 만든다. 쓰고 나서 바꾸면 그 사이 잠깐 남이 읽을 수 있다.
-        fd = os.open(self.key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(key + "\n")
-        os.chmod(self.key_file, 0o600)
-        say("열쇠 바꿈")
-        return True, None
+        # 지금 답하는 중인 대화. MCP 도구 호출은 다른 스레드(main.py 의 /mcp)로 오니 여기서 화면 줄을 넘겨받는다.
+        self.live = None
+        self.emit_lock = threading.Lock()
 
     # 대화 기록 -----------------------------------------------------------
 
@@ -221,8 +190,7 @@ class Assistant:
 
     def status(self):
         return {
-            "sdk": True,
-            "hasKey": self.read_key() is not None,
+            "brain": "claude-code",
             "model": MODEL,
             "busy": self.busy.locked(),
             "briefAt": BRIEF_AT,
@@ -231,30 +199,26 @@ class Assistant:
 
     # 맥락 ---------------------------------------------------------------
 
-    def context(self):
-        # 지난 턴은 글로만 넘긴다. 도구 호출 블록까지 다시 보내면 매번 보내는 양이 불고, 한 일은 한 줄 요약이면 충분하다.
-        msgs = []
+    def transcript(self, text):
+        # Claude Code 에는 대화를 한 마디씩 이어 붙일 수 없어(-p 한 번이 한 물음) 지난 턴을 글로 묶어 같이 준다.
+        # 도구 호출은 다시 보내지 않고 "(한 일: ...)" 한 줄로만. 매번 보내는 양이 불지 않게.
+        lines = []
         for t in self.turns()[-HISTORY_TURNS:]:
             role = t.get("role")
             if role not in ("user", "assistant"):
                 continue
-            text = t.get("text") or ""
+            said = t.get("text") or ""
             if role == "assistant":
                 done = t.get("tools") or []
                 if done:
-                    text = (text + "\n" if text else "") + "(한 일: " + "; ".join(done) + ")"
-                if not text:
-                    text = "(답하지 못함)"
-            if not text:
-                continue
-            if not msgs and role == "assistant":
-                # 대화가 아침 보고로 시작하면 앞에 묻는 말이 없다. 첫 메시지는 사용자 것이어야 해서 하나 채운다.
-                msgs.append({"role": "user", "content": "(아침 보고를 열어 봄)"})
-            if msgs and msgs[-1]["role"] == role:
-                msgs[-1]["content"] += "\n\n" + text
-            else:
-                msgs.append({"role": role, "content": text})
-        return msgs
+                    said = (said + "\n" if said else "") + "(한 일: " + "; ".join(done) + ")"
+                if not said:
+                    said = "(답하지 못함)"
+            if said:
+                lines.append(("대장: " if role == "user" else "하치와레: ") + said)
+        if not lines:
+            return text
+        return "지난 대화(오래된 것부터)\n\n" + "\n\n".join(lines) + "\n\n대장이 지금 한 말\n" + text
 
     def snapshot(self):
         now = datetime.now()
@@ -437,27 +401,75 @@ class Assistant:
 
     def opening(self, lines):
         # 한마디만 모델이 쓴다. 숫자는 위에서 센 것만 보여 주고 새로 만들지 말라고 한다.
-        key = self.read_key()
-        if not key:
+        reply, _, error, _ = self.brain(SYSTEM, (
+            "오늘 아침 보고 자료다.\n" + "\n".join(lines) +
+            "\n\n대장에게 건넬 첫마디를 한두 문장으로 써. 자료에 없는 숫자나 일은 만들지 말고, "
+            "오늘 먼저 볼 것 하나를 짚어. 인사말만 쓰지 말 것."), timeout=180)
+        if error:
+            say(f"아침 보고 한마디 실패 · {error[:120]}")
             return None
+        return reply or None
+
+    # 머리 ---------------------------------------------------------------
+
+    def brain(self, system, prompt, tools=False, on_event=None, timeout=240):
+        """홈 화면 서버에 Claude Code 를 돌려 달라고 한다. (답 글, 사용량, 오류 문구, 오류 갈래)"""
+        body = json.dumps({"system": system, "prompt": prompt, "model": MODEL, "effort": EFFORT,
+                           "tools": tools, "timeout": timeout}).encode("utf-8")
+        usage = {"in": 0, "out": 0}
+        last = None
         try:
-            r = anthropic.Anthropic(api_key=key, timeout=30.0, max_retries=1).messages.create(
-                model=MODEL,
-                max_tokens=4000,
-                system=SYSTEM,
-                output_config={"effort": EFFORT},
-                messages=[{"role": "user", "content": (
-                    "오늘 아침 보고 자료다.\n" + "\n".join(lines) +
-                    "\n\n대장에게 건넬 첫마디를 한두 문장으로 써. 자료에 없는 숫자나 일은 만들지 말고, "
-                    "오늘 먼저 볼 것 하나를 짚어. 인사말만 쓰지 말 것.")}],
-            )
-        except anthropic.APIError as e:
-            say(f"아침 보고 한마디 실패 · {type(e).__name__}")
-            return None
-        if r.stop_reason == "refusal":
-            return None
-        text = "".join(b.text for b in r.content if b.type == "text").strip()
-        return text or None
+            conn = http.client.HTTPConnection(*home.hostport(), timeout=timeout + 30)
+            conn.request("POST", "/api/claude", body=body,
+                         headers={"X-Chii": "1", "Content-Type": "application/json"})
+            resp = conn.getresponse()
+            if resp.status != 200:
+                return "", usage, f"홈 화면 서버가 머리를 못 빌려줬어 ({resp.status})", "brain"
+            for raw in resp:
+                try:
+                    ev = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(ev, dict):
+                    continue
+                if ev.get("type") == "chii_error":
+                    return "", usage, f"Claude 를 못 불렀어: {ev.get('error') or ''}".strip(), "brain"
+                if ev.get("type") == "result":
+                    last = ev
+                elif on_event:
+                    on_event(ev)
+            conn.close()
+        except OSError as e:
+            return "", usage, f"홈 화면 서버에 안 닿아 ({e})", "net"
+        if last is None:
+            return "", usage, "Claude 가 답 없이 끝났어", "brain"
+        u = last.get("usage") or {}
+        usage["in"] = sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+        usage["out"] = int(u.get("output_tokens") or 0)
+        text = str(last.get("result") or "").strip()
+        if last.get("is_error") or last.get("subtype") != "success":
+            # 구독 한도에 닿으면 Claude Code 가 풀리는 때를 결과 글에 적어 준다. 그대로 보여 준다.
+            code = "limit" if "limit" in text.lower() else "brain"
+            return "", usage, f"Claude 가 답을 못 했어: {text[:200] or last.get('subtype')}", code
+        return text, usage, None, None
+
+    def mcp_call(self, name, args):
+        """MCP 로 온 도구 호출. 대화 중일 때만 받는다. (모델에게 줄 글, 실패 여부)"""
+        live = self.live
+        if not live:
+            return "지금은 대장과 이야기하는 중이 아니라 도구를 쓸 수 없다", True
+        live["calls"] += 1
+        if live["calls"] > MAX_TOOL_CALLS:
+            return "이번 답에서 도구를 너무 많이 불렀다. 더 부르지 말고 지금까지 한 것만 말한다.", True
+        out, chip, conf, bad = self.run_tool(name, args)
+        if chip:
+            live["chips"].append(chip)
+            live["emit"]({"t": "tool", "d": chip, "bad": bad})
+        if conf:
+            live["confirm"] = conf
+            live["emit"]({"t": "confirm", **conf})
+        live["emit"]({"t": "refresh"})
+        return out, bad
 
     def bot_name(self, project):
         st = home.state() or {}
@@ -478,119 +490,54 @@ class Assistant:
             self.busy.release()
 
     def _chat(self, text, emit):
-        key = self.read_key()
-        if not key:
-            emit({"t": "error", "code": "key", "d": "하치와레 열쇠가 없어."})
-            return
+        prompt = self.transcript(text)
         self.append({"t": time.time(), "role": "user", "text": text})
-        client = anthropic.Anthropic(api_key=key, timeout=60.0, max_retries=2)
-        system = [{"type": "text", "text": SYSTEM}, {"type": "text", "text": self.snapshot()}]
-        messages = self.context()
+        system = SYSTEM + "\n\n" + self.snapshot()
 
-        parts, chips, confirm = [], [], None
-        usage = {"in": 0, "out": 0}
-        error = code = None
-        gap = False  # 도구를 다녀온 뒤 이어지는 말은 줄을 바꿔 붙인다.
-        json_retries = 0
-        step = 0
+        def out(obj):
+            # 답 글자와 도구 줄이 서로 다른 스레드에서 같은 응답에 쓰인다.
+            with self.emit_lock:
+                emit(obj)
+
+        parts = []
+        live = {"emit": out, "chips": [], "confirm": None, "calls": 0}
+        state = {"gap": False}
+
+        def on_event(ev):
+            # 글자가 나오는 대로 흘린다. 도구를 다녀온 뒤 새 메시지로 이어지는 말은 줄을 바꿔 붙인다.
+            if ev.get("type") != "stream_event":
+                return
+            e = ev.get("event") or {}
+            if e.get("type") == "message_start" and parts:
+                state["gap"] = True
+            elif e.get("type") == "content_block_delta" and (e.get("delta") or {}).get("type") == "text_delta":
+                piece = e["delta"].get("text") or ""
+                if not piece:
+                    return
+                if state["gap"]:
+                    state["gap"] = False
+                    parts.append("\n")
+                    out({"t": "text", "d": "\n"})
+                parts.append(piece)
+                out({"t": "text", "d": piece})
+
         started = time.time()
-        while step < MAX_STEPS:
-            step += 1
-            try:
-                with client.messages.stream(
-                    model=MODEL,
-                    max_tokens=16000,
-                    system=system,
-                    tools=TOOLS,
-                    messages=messages,
-                    output_config={"effort": EFFORT},
-                ) as stream:
-                    for event in stream:
-                        if event.type == "text" and event.text:
-                            if gap and parts:
-                                parts.append("\n")
-                                emit({"t": "text", "d": "\n"})
-                            gap = False
-                            parts.append(event.text)
-                            emit({"t": "text", "d": event.text})
-                    msg = stream.get_final_message()
-                json_retries = 0
-            except ValueError:
-                # 도구 입력 JSON 을 아예 못 읽었다. 그 도구 호출은 끝나지 않아 답할 id 가 없으니 같은 턴을 다시 묻는다.
-                json_retries += 1
-                if json_retries > 2:
-                    error, code = "도구 입력을 못 읽었어. 다시 말해 줘.", "bad"
-                    break
-                step -= 1
-                continue
-            except anthropic.AuthenticationError:
-                error, code = "열쇠가 안 맞아. 새 열쇠를 넣어 줘.", "key"
-                break
-            except anthropic.PermissionDeniedError:
-                error, code = f"이 열쇠로는 {MODEL} 을 못 써.", "key"
-                break
-            except anthropic.RateLimitError:
-                error, code = "너무 자주 불렀어. 조금 있다가 다시 말해 줘.", "rate"
-                break
-            except anthropic.BadRequestError as e:
-                m = str(getattr(e, "message", e))
-                if "credit" in m.lower():
-                    error, code = "크레딧이 바닥났어. Console 에서 충전해 줘.", "credit"
-                elif "limit" in m.lower():
-                    error, code = "이번 달 한도에 닿았어. Console 작업 공간 한도를 봐 줘.", "credit"
-                else:
-                    error, code = f"요청이 거절됐어: {m[:160]}", "bad"
-                break
-            except anthropic.APIStatusError as e:
-                error, code = f"Anthropic 쪽이 지금 대답을 못 해 ({e.status_code}). 조금 뒤에 다시.", "server"
-                break
-            except anthropic.APIConnectionError:
-                error, code = "Anthropic 에 안 닿아. 인터넷을 봐 줘.", "net"
-                break
-
-            usage["in"] += msg.usage.input_tokens
-            usage["out"] += msg.usage.output_tokens
-            if msg.stop_reason == "refusal":
-                error, code = "그건 내가 도와줄 수 없는 일이야.", "refusal"
-                break
-            tool_uses = [b for b in msg.content if b.type == "tool_use"]
-            if not tool_uses:
-                if msg.stop_reason == "max_tokens":
-                    error, code = "말이 너무 길어져서 끊겼어.", "long"
-                break
-            if msg.stop_reason == "max_tokens":
-                # 잘린 도구 입력은 반쯤 채워진 채로 읽힌다. 그대로 실행하면 엉뚱한 일을 하니 멈춘다.
-                error, code = "말이 너무 길어져서 끊겼어.", "long"
-                break
-
-            results = []
-            for b in tool_uses:
-                out, chip, conf, bad = self.run_tool(b.name, b.input)
-                if chip:
-                    chips.append(chip)
-                    emit({"t": "tool", "d": chip, "bad": bad})
-                if conf:
-                    confirm = conf
-                    emit({"t": "confirm", **conf})
-                res = {"type": "tool_result", "tool_use_id": b.id, "content": out}
-                if bad:
-                    res["is_error"] = True
-                results.append(res)
-            # 생각 블록까지 응답을 통째로 돌려줘야 다음 단계에서 이어서 생각한다.
-            messages.append({"role": "assistant", "content": msg.content})
-            messages.append({"role": "user", "content": results})
-            emit({"t": "refresh"})
-            gap = True
-        else:
-            error, code = "할 일이 너무 많이 이어져서 여기서 멈췄어.", "steps"
-
+        self.live = live
+        try:
+            final, usage, error, code = self.brain(system, prompt, tools=True, on_event=on_event)
+        finally:
+            self.live = None
         reply = "".join(parts).strip()
+        if not reply and final:
+            # 글자 흐름을 못 받았어도 마지막 답은 결과에 있다.
+            reply = final
+            out({"t": "text", "d": final})
         if error:
-            emit({"t": "error", "code": code, "d": error})
+            out({"t": "error", "code": code, "d": error})
         self.append({
-            "t": time.time(), "role": "assistant", "text": reply, "tools": chips,
-            "confirm": confirm, "error": error, "code": code, "model": MODEL, "usage": usage,
+            "t": time.time(), "role": "assistant", "text": reply, "tools": live["chips"],
+            "confirm": live["confirm"], "error": error, "code": code, "model": MODEL, "usage": usage,
         })
-        say(f"대화 한 번 · {time.time() - started:.1f}초 · 토큰 {usage['in']}/{usage['out']} · 도구 {len(chips)}개"
+        say(f"대화 한 번 · {time.time() - started:.1f}초 · 토큰 {usage['in']}/{usage['out']} · 도구 {len(live['chips'])}개"
             + (f" · 오류 {code}" if code else ""))
-        emit({"t": "done"})
+        out({"t": "done"})

@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import brain
 from night import Night
 
 HERE = Path(__file__).resolve().parent
@@ -796,7 +797,30 @@ class Handler(BaseHTTPRequestHandler):
             ok, err = start_update()
             return self.send_json({"ok": True} if ok else {"error": err}, 200 if ok else 409)
 
-        if u.path in ("/api/assistant/key", "/api/assistant/clear", "/api/assistant/chat", "/api/assistant/brief"):
+        if u.path == "/api/claude":
+            # 하치와레 봇(같은 PC 의 컨테이너)만 부르는 문. 다른 기기에서 Tailscale 로 열었을 땐 대화창(/api/assistant/chat)을 쓴다.
+            if self.remote:
+                return self.send_error(403)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.close_connection = True
+
+            def write(obj):
+                try:
+                    self.wfile.write((json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+                except OSError:
+                    pass
+
+            try:
+                brain.run(NIGHT, ASSIST_PORT, data, write)
+            except Exception as e:  # noqa: BLE001  claude 를 못 찾는 것까지 하치와레가 말로 전하게 한다.
+                write({"type": "chii_error", "error": str(e)[:300]})
+            return None
+
+        if u.path in ("/api/assistant/clear", "/api/assistant/chat", "/api/assistant/brief"):
             return self.assistant("POST", "/" + u.path.rsplit("/", 1)[1], data, stream=u.path.endswith("/chat"))
 
         return self.send_error(404)

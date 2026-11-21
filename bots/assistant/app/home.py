@@ -30,6 +30,11 @@ def call(method, path, body=None, timeout=30):
         return 0, {"error": f"홈 화면에 안 닿음 ({e})"}
 
 
+def hostport():
+    u = urllib.parse.urlsplit(BASE)
+    return u.hostname or "127.0.0.1", u.port or 80
+
+
 def q(s):
     return urllib.parse.quote(str(s), safe="")
 

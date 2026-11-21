@@ -8,7 +8,7 @@ services:
     # 홈 화면 서버(127.0.0.1:7682)를 부르고, 홈 화면이 127.0.0.1:7683 으로 이 봇을 부른다.
     # 둘 다 Debian 밖으로 열지 않는 주소라 브리지 네트워크로는 서로 닿지 않는다.
     network_mode: host
-    # 대화·열쇠 파일이 Debian 사용자(sehyun, 1000) 것이어야 setup.sh 와 홈 화면이 손댈 수 있다.
+    # 대화·토큰 파일이 Debian 사용자(sehyun, 1000) 것이어야 setup.sh 와 홈 화면이 손댈 수 있다.
     user: "1000:1000"
     environment:
       CHII_HOME_URL: http://127.0.0.1:7682

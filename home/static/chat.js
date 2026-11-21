@@ -59,9 +59,7 @@
     }
   }
   function focusChat() {
-    const key = $("#key-input");
-    if (key) key.focus();
-    else if (!input.disabled) input.focus();
+    if (!input.disabled) input.focus();
   }
   tabs.chat.addEventListener("click", () => setTab("chat", true));
   tabs.term.addEventListener("click", () => setTab("term", true));
@@ -154,51 +152,6 @@
       box.append(b);
     }
     li.append(box);
-  }
-
-  function keyForm(message) {
-    const li = hello("하치와레 열쇠가 아직 없어",
-      "Claude Console 에서 만든 하치와레 전용 API 키를 넣어 줘. 하치와레 봇 안(/var/lib/chiios/assistant)에만 저장되고 화면에는 다시 나오지 않아.");
-    li.classList.add("key");
-    const f = el("form", "key-form");
-    const k = el("input");
-    k.id = "key-input";
-    k.type = "password";
-    k.placeholder = "sk-ant-...";
-    k.autocomplete = "off";
-    k.spellcheck = false;
-    k.setAttribute("aria-label", "하치와레 API 키");
-    const b = el("button", "glass primary", "넣기");
-    b.type = "submit";
-    f.append(k, b);
-    const err = el("p", "err", message || "");
-    err.hidden = !message;
-    f.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const key = k.value.trim();
-      if (!key) return;
-      b.disabled = true;
-      b.textContent = "맞춰 보는 중";
-      let data = {};
-      let ok = false;
-      try {
-        const r = await post("/api/assistant/key", { key });
-        ok = r.ok;
-        data = await r.json().catch(() => ({}));
-      } catch {}
-      k.value = "";
-      if (ok) {
-        await load();
-        focusChat();
-        return;
-      }
-      b.disabled = false;
-      b.textContent = "넣기";
-      err.textContent = data.error || "집이랑 연락이 끊겼어.";
-      err.hidden = false;
-      k.focus();
-    });
-    li.append(f, err, el("span", "dim small", "니나브와 잔액을 같이 쓰니까, 월 한도를 걸어 둔 작업 공간에서 만든 키가 좋아."));
   }
 
   // 비서는 따로 도는 봇이라 재워 둘 수 있다. 그때는 여기서 바로 깨운다(봇 칸 깨우기와 같은 길).
@@ -410,18 +363,14 @@
       info = null;
     }
     log.replaceChildren();
-    const ok = !!info && !info.down && info.hasKey;
+    const ok = !!info && !info.down;
     input.disabled = sendBtn.disabled = !ok;
     input.placeholder = ok ? "하치와레에게 말 걸기  ·  Enter 보내기, Shift+Enter 줄바꿈"
-      : info && info.down ? "하치와레를 깨우면 말을 걸 수 있어" : "열쇠를 넣으면 말을 걸 수 있어";
+      : "하치와레를 깨우면 말을 걸 수 있어";
     if (!info) hello("집이랑 연락이 끊겼어", "홈 화면 서버가 꺼진 것 같아.");
     else if (info.down && info.missing) hello("하치와레 봇이 아직 없어", "Windows 쪽 chiiOS 폴더에서 setup.sh 를 다시 돌리면 구워서 깨운다.");
     else if (info.down) sleeping();
-    else if (!info.hasKey) {
-      // 열쇠가 없어도 아침 보고는 나온다(맨 위 한마디만 정해진 말로 바뀐다). 열쇠 칸 위에 같이 보여 준다.
-      renderTurns(info.turns.filter((t) => t.kind === "brief"));
-      keyForm();
-    } else if (!info.turns.length) greet();
+    else if (!info.turns.length) greet();
     else {
       renderTurns(info.turns);
       toBottom();
@@ -456,7 +405,7 @@
 
   async function send(raw) {
     const text = raw.trim();
-    if (!text || busy || !info || !info.hasKey) return;
+    if (!text || busy || !info || info.down) return;
     busy = true;
     sendBtn.disabled = true;
     input.value = "";
@@ -470,7 +419,6 @@
     toBottom();
 
     let got = false;
-    let keyBad = false;
     const handle = (ev) => {
       const stick = nearBottom();
       if (ev.t === "text") {
@@ -483,10 +431,7 @@
       } else if (ev.t === "tool") chip(row, ev.d, ev.bad);
       else if (ev.t === "confirm") confirmBox(row, ev, true);
       else if (ev.t === "refresh") window.chiiRefresh?.();
-      else if (ev.t === "error") {
-        errLine(row, ev.d);
-        if (ev.code === "key") keyBad = true;
-      }
+      else if (ev.t === "error") errLine(row, ev.d);
       if (stick) toBottom();
     };
 
@@ -518,12 +463,7 @@
     busy = false;
     sendBtn.disabled = false;
     window.chiiRefresh?.();
-    if (keyBad) {
-      keyForm("지금 열쇠가 안 맞아. 새 열쇠를 넣어 줘.");
-      toBottom();
-    } else {
-      input.focus();
-    }
+    input.focus();
   }
 
   // 한 줄일 땐 스크롤바 없이, 160px 을 넘을 때만 스크롤. scrollHeight 는 테두리를 빼고 재므로 2px 를 더한다.

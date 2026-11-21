@@ -1,4 +1,4 @@
-# 비서 봇의 문(127.0.0.1:7683). 홈 화면 서버만 이 문을 두드린다.
+# 비서 봇의 문(127.0.0.1:7683). 홈 화면 서버와, 머리인 Windows 쪽 Claude Code(/mcp 도구)가 두드린다.
 # Windows 쪽 브라우저에서도 이 주소가 열리므로, 홈 화면처럼 Host 와 X-Chii 머리글을 보고 다른 사이트의 요청을 막는다.
 import json
 import os
@@ -6,7 +6,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from assistant import Assistant, say
+import mcp
+from assistant import TOOLS, Assistant, say
 
 PORT = int(os.environ.get("ASSIST_PORT", "7683"))
 A = Assistant(os.environ.get("ASSIST_DATA", "/data"))
@@ -42,6 +43,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.allowed():
             return self.send_error(403)
+        if self.path == "/mcp":
+            # 서버가 먼저 말을 거는 길(SSE)은 두지 않는다. 405 면 클라이언트는 POST 만 쓴다.
+            self.send_response(405)
+            self.send_header("Allow", "POST")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return None
         if self.path == "/status":
             return self.send_json(A.status())
         return self.send_error(404)
@@ -50,9 +58,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             return self.send_error(403)
         data = self.body()
-        if self.path == "/key":
-            ok, err = A.save_key(data.get("key"))
-            return self.send_json({"ok": True} if ok else {"error": err}, 200 if ok else 400)
+        if self.path == "/mcp":
+            out = mcp.handle(data, TOOLS, A.mcp_call)
+            if out is None:
+                self.send_response(202)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            return self.send_json(out)
         if self.path == "/clear":
             A.clear()
             return self.send_json({"ok": True})
@@ -94,6 +107,6 @@ def morning_loop():
 
 
 if __name__ == "__main__":
-    say(f"하치와레 깨어남 · 127.0.0.1:{PORT} · {A.status()['model']} · 열쇠 {'있음' if A.read_key() else '없음'}")
+    say(f"하치와레 깨어남 · 127.0.0.1:{PORT} · 머리 Claude Code {A.status()['model']}")
     threading.Thread(target=morning_loop, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

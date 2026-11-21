@@ -261,7 +261,7 @@ if [ -n "$latest" ] && [ ! -e "/home/$CHII_USER/.local/share/chiios/todos.json" 
   cp -a "$rtmp/assistant/." /var/lib/chiios/assistant/
   chown -R "$CHII_USER:$CHII_USER" "/home/$CHII_USER/.local/share/chiios" /var/lib/chiios/assistant
   rm -rf "$rtmp"
-  echo "백업에서 되살렸다: $latest (비서 열쇠는 백업에 없으니 다시 넣는다)"
+  echo "백업에서 되살렸다: $latest (하치와레의 GitHub 토큰은 백업에 없으니 다시 둔다)"
 else
   echo "되살릴 것 없음"
 fi
@@ -297,7 +297,7 @@ systemctl enable chii-home.service
 systemctl restart chii-home.service
 
 step "비서 봇 (포트 $ASSIST_PORT)"
-# 비서는 니나브처럼 따로 도는 봇이다(bots/assistant). 대화와 열쇠는 레포 사본(/opt/chiios)이 아니라
+# 비서는 니나브처럼 따로 도는 봇이다(bots/assistant). 대화와 토큰은 레포 사본(/opt/chiios)이 아니라
 # 여기 둔다. setup.sh 를 다시 돌릴 때마다 /opt/chiios/bots 는 지우고 새로 깔기 때문이다.
 install -d -m 700 -o "$CHII_USER" -g "$CHII_USER" /var/lib/chiios/assistant
 install -d /var/lib/chiios/no-work
