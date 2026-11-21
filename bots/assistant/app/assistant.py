@@ -25,6 +25,8 @@ HISTORY_TURNS = 20
 MAX_TOOL_CALLS = 8
 # 아침 보고 시각(지역 시각). 그 시각에 PC 가 꺼져 있었으면 켜진 뒤 처음 1분 안에 한다.
 BRIEF_AT = os.environ.get("ASSIST_BRIEF_AT", "08:00")
+# 손에게 맡긴 일 하나의 상한(초). clone·설치 정도는 몇 분이면 끝나고, 넘으면 하던 데까지만 보고한다.
+WORK_TIMEOUT = 1200
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 DAYS = "월화수목금토일"
 
@@ -40,13 +42,15 @@ SYSTEM = """너는 chiiOS 의 비서 봇이고 이름은 하치와레다. chiiOS
 - 할 일 관리: add_todo, update_todo, delete_todo 로 3번 칸의 할 일을 바꾼다. 할 일 id 는 "지금 상태"에 있다. 대장이 끝냈다고 하면 지우지 말고 끝낸 걸로 바꾼다. 지우는 건 대장이 지우라고 할 때만 한다.
 - 봇 돌보기: bot_control 로 봇을 깨우고(start) 재우고(stop) 다시 굽는다(bake). 쓰러진 이유를 물으면 bot_logs 로 기록을 읽고 원인을 짧게 짚는다.
 - 한 일 정리: "어제 뭐 했지", "이번 주 정리" 같은 질문에는 recent_work 로 모든 저장소의 커밋과 아직 커밋 안 한 변경을 모아 보고 말한다. 매일 아침에는 아침 보고가 대화에 따로 올라온다.
+- 손 쓰기: PC 에서 실제로 해야 하는 일(저장소 받기·설치·명령·파일 확인)이나 지금 상태로 답할 수 없는 물음(메모리 동기화, 어떤 파일·저장소가 어디 있는지, 무엇이 깔렸는지)은 do_work 로 손에게 맡긴다. 손은 대장의 메모리를 읽으니 "치이스페", "내 깃" 같은 말도 알아듣는다. 맡기기 전에 "할까?" 하고 묻지 말고 바로 맡긴다. 끝나면 손의 보고를 짧게 전한다.
 
 지켜야 할 것
-- 상태는 "지금 상태"와 도구 결과만 믿는다. 모르는 건 지어내지 말고 모른다고 한다.
+- 상태는 "지금 상태"와 도구 결과만 믿는다. 모르는 건 지어내지 않는다. 손으로 알아낼 수 있으면 do_work 로 알아보고, 그래도 모르면 모른다고 한다.
+- 대장 말이 짧거나 오타가 섞여도 되묻기 전에 지난 대화에서 뜻을 찾는다. 여러 뜻이면 가장 그럴듯한 것으로 하고 무엇으로 알아들었는지 한 줄 적는다.
+- 니나브 운영 서버에 접속하거나, 대장이 말하지 않은 푸시·배포를 손에게 시키지 않는다.
 - 니나브(loa-bot)는 Oracle 서버에서 도는 운영 봇과 디스코드 토큰이 같아서, 둘이 같이 켜지면 응답이 꼬인다. 그래서 깨우기 전 주의가 있는 봇의 start 는 바로 깨우지 않고 대장 화면에 확인 단추를 띄운다. 그때는 단추를 눌러 달라고 안내하고, 깨웠다고 말하지 않는다.
 - 너 자신은 재울 수 없다. 재우고 싶다고 하면 봇 칸의 재우기 단추를 쓰라고 안내한다.
-- 도구가 실패하면 실패했다고 그대로 말한다.
-- 터미널 명령을 대신 칠 수는 없다. 필요하면 대장이 칠 명령을 알려 준다(1번 칸 터미널 탭)."""
+- 도구가 실패하면 실패했다고 그대로 말한다."""
 
 TOOLS = [
     {
@@ -115,6 +119,23 @@ TOOLS = [
             "properties": {"days": {"type": "integer", "description": "며칠 전부터 볼지. 기본 1, 많아야 14."}},
         },
     },
+    {
+        "name": "do_work",
+        "description": (
+            "이 PC(Windows)에서 실제로 손을 써야 하는 일을 손에게 맡기고, 끝날 때까지 기다려 보고를 받는다. "
+            "손은 대장이 평소 쓰는 Claude Code 그대로라 명령 실행·파일 읽고 쓰기·저장소 받기(git clone)·설치·웹 찾기를 하고, "
+            "대장의 메모리와 규칙(CLAUDE.md)을 읽어 대장의 저장소·기기·설정을 안다. 몇 분 걸릴 수 있다. "
+            "'받아 봐', '깔아 봐', '됐는지 봐', '메모리 동기화 됐어?', '어디 있지?' 처럼 지금 상태와 다른 도구로 알 수 없거나 "
+            "PC 에서 해야 하는 일이면 모른다고 하지 말고 이걸 쓴다."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"task": {"type": "string", "description": (
+                "손에게 줄 일. 손은 이 대화를 못 보니, 대장이 한 말 그대로와 지난 대화에서 알게 된 맥락"
+                "(무엇을, 어디에, 어떤 저장소)을 같이 적는다. 대장 말이 줄임말·오타면 원문도 같이 넣는다.")}},
+            "required": ["task"],
+        },
+    },
 ]
 # MCP 로 오는 입력은 스키마 검사를 거쳤다고 믿지 않는다. run_tool 이 하나씩 직접 본다.
 
@@ -141,6 +162,57 @@ def bot_status(b):
     if b["exitCode"] in (0, 137, 143):
         return "쉬는 중"
     return f"쓰러짐(exit {b['exitCode']})"
+
+
+def claude_stream(path, body, timeout, on_event=None):
+    """홈 화면 서버에 Claude Code 를 돌려 달라고 하고 사건을 흘려받는다. (결과 사건, 오류 문구, 오류 갈래)"""
+    last = None
+    try:
+        conn = http.client.HTTPConnection(*home.hostport(), timeout=timeout + 30)
+        conn.request("POST", path, body=json.dumps(body).encode("utf-8"),
+                     headers={"X-Chii": "1", "Content-Type": "application/json"})
+        resp = conn.getresponse()
+        if resp.status != 200:
+            return None, f"홈 화면 서버가 Claude 를 못 빌려줬어 ({resp.status})", "brain"
+        for raw in resp:
+            try:
+                ev = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(ev, dict):
+                continue
+            if ev.get("type") == "chii_error":
+                return None, f"Claude 를 못 불렀어: {ev.get('error') or ''}".strip(), "brain"
+            if ev.get("type") == "result":
+                last = ev
+            elif on_event:
+                on_event(ev)
+        conn.close()
+    except OSError as e:
+        return None, f"홈 화면 서버에 안 닿아 ({e})", "net"
+    if last is None:
+        return None, "Claude 가 답 없이 끝났어", "brain"
+    return last, None, None
+
+
+def step_line(tool):
+    """손이 쓴 도구 하나를 화면 한 줄로. 무엇을 하는지만 보이면 된다."""
+    name = tool.get("name") or "?"
+    inp = tool.get("input") or {}
+    if name in ("Bash", "PowerShell"):
+        what = str(inp.get("description") or inp.get("command") or "")
+    elif name in ("Read", "Write", "Edit", "NotebookEdit"):
+        what = str(inp.get("file_path") or inp.get("notebook_path") or "").replace("\\", "/").rsplit("/", 1)[-1]
+    elif name in ("Glob", "Grep"):
+        what = str(inp.get("pattern") or "")
+    elif name in ("WebFetch", "WebSearch"):
+        what = str(inp.get("url") or inp.get("query") or "")
+    else:
+        what = ""
+    what = " ".join(what.split())
+    if len(what) > 70:
+        what = what[:69] + "…"
+    return f"손 · {name}" + (f" · {what}" if what else "")
 
 
 def say(line):
@@ -364,7 +436,43 @@ class Assistant:
                 lines.append(f"(참고: {note})")
             return "\n".join(lines) or f"최근 {days}일 동안 커밋도 변경도 없다", f"최근 {days}일 한 일 모아 봄", None, False
 
+        if name == "do_work":
+            task = args.get("task")
+            if not isinstance(task, str) or not task.strip():
+                return "task 가 비었다", None, None, True
+            return self.do_work(task.strip())
+
         return f"{name} 라는 도구는 없다", None, None, True
+
+    def do_work(self, task):
+        live = self.live
+        steps = []
+
+        def on_event(ev):
+            if ev.get("type") != "assistant":
+                return
+            for c in (ev.get("message") or {}).get("content") or []:
+                if isinstance(c, dict) and c.get("type") == "tool_use":
+                    line = step_line(c)
+                    steps.append(line)
+                    if live:
+                        live["emit"]({"t": "tool", "d": line, "bad": False})
+
+        started = time.time()
+        if live:
+            live["emit"]({"t": "tool", "d": "손에게 맡김", "bad": False})
+        last, error, _ = claude_stream("/api/claude/work", {"task": task, "timeout": WORK_TIMEOUT},
+                                       WORK_TIMEOUT + 60, on_event)
+        sec = time.time() - started
+        took = f"{int(sec)}초" if sec < 60 else span(sec)
+        say(f"손 · {took} · {len(steps)}단계" + (" · 실패" if error else ""))
+        if error:
+            return f"손이 일을 못 끝냈다: {error}", f"손 · 실패 · {took}", None, True
+        text = str(last.get("result") or "").strip()
+        bad = bool(last.get("is_error")) or last.get("subtype") != "success"
+        if bad:
+            return f"손이 일을 못 끝냈다: {text[:600] or last.get('subtype')}", f"손 · 실패 · {took}", None, True
+        return text or "(손이 보고 없이 끝냈다)", f"손 · {len(steps)}단계 · {took}", None, False
 
     # 아침 보고 -----------------------------------------------------------
 
@@ -414,35 +522,12 @@ class Assistant:
 
     def brain(self, system, prompt, tools=False, on_event=None, timeout=240):
         """홈 화면 서버에 Claude Code 를 돌려 달라고 한다. (답 글, 사용량, 오류 문구, 오류 갈래)"""
-        body = json.dumps({"system": system, "prompt": prompt, "model": MODEL, "effort": EFFORT,
-                           "tools": tools, "timeout": timeout}).encode("utf-8")
         usage = {"in": 0, "out": 0}
-        last = None
-        try:
-            conn = http.client.HTTPConnection(*home.hostport(), timeout=timeout + 30)
-            conn.request("POST", "/api/claude", body=body,
-                         headers={"X-Chii": "1", "Content-Type": "application/json"})
-            resp = conn.getresponse()
-            if resp.status != 200:
-                return "", usage, f"홈 화면 서버가 머리를 못 빌려줬어 ({resp.status})", "brain"
-            for raw in resp:
-                try:
-                    ev = json.loads(raw)
-                except ValueError:
-                    continue
-                if not isinstance(ev, dict):
-                    continue
-                if ev.get("type") == "chii_error":
-                    return "", usage, f"Claude 를 못 불렀어: {ev.get('error') or ''}".strip(), "brain"
-                if ev.get("type") == "result":
-                    last = ev
-                elif on_event:
-                    on_event(ev)
-            conn.close()
-        except OSError as e:
-            return "", usage, f"홈 화면 서버에 안 닿아 ({e})", "net"
-        if last is None:
-            return "", usage, "Claude 가 답 없이 끝났어", "brain"
+        last, error, code = claude_stream("/api/claude", {
+            "system": system, "prompt": prompt, "model": MODEL, "effort": EFFORT, "tools": tools, "timeout": timeout,
+        }, timeout, on_event)
+        if error:
+            return "", usage, error, code
         u = last.get("usage") or {}
         usage["in"] = sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
         usage["out"] = int(u.get("output_tokens") or 0)
@@ -524,7 +609,8 @@ class Assistant:
         started = time.time()
         self.live = live
         try:
-            final, usage, error, code = self.brain(system, prompt, tools=True, on_event=on_event)
+            final, usage, error, code = self.brain(system, prompt, tools=True, on_event=on_event,
+                                                   timeout=WORK_TIMEOUT + 600)
         finally:
             self.live = None
         reply = "".join(parts).strip()

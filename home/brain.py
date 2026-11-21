@@ -1,17 +1,22 @@
 # 하치와레 대화·아침 한마디의 머리. 머리는 대장 구독의 Claude Code 라 따로 API 키가 없다.
 # 하치와레 봇은 컨테이너 안이라 Windows 쪽 claude.exe 를 못 부르고, WSL interop 이 되는 이 서버가 대신 돌린다.
 # 무엇을 돌릴지는 여기서 정한다: 받는 건 시스템 프롬프트·물음·모델뿐이고, 내장 도구(셸·파일)는 다 끈 채
-# 하치와레가 MCP 로 내준 도구(할 일·봇)만 쓰게 한다. 아무 인자나 넘길 수 있으면 Windows 에서 뭐든 돌릴 수 있게 된다.
+# 하치와레가 MCP 로 내준 도구(할 일·봇·손에게 맡기기)만 쓰게 한다. 아무 인자나 넘길 수 있으면 Windows 에서 뭐든 돌릴 수 있게 된다.
+# PC 에서 실제로 손을 쓰는 일은 아래 work 가 따로, 정해 둔 인자로만 돌린다.
 import json
 import re
 import uuid
 from pathlib import Path
 
+from night import linux_path
+
 MODEL_OK = re.compile(r"[\w.\-\[\]]{1,60}")
 # 대장의 전역 CLAUDE.md·자동 메모리를 매번 싣지 않는다(실측 6.5천 -> 0.8천 토큰). 하치와레 규칙은 시스템 프롬프트에 있다.
 # 훅도 끈다: 대장 설정의 알림 소리 같은 게 대화 한 마디마다 울리면 안 된다.
+# MCP_TOOL_TIMEOUT: 손(do_work)에게 맡긴 일은 몇 분 걸린다. 그동안 대화 머리가 도구 답을 기다리다 먼저 포기하지 않게.
 SETTINGS = {"disableAllHooks": True, "autoMemoryEnabled": False,
-            "claudeMdExcludes": ["**/CLAUDE.md", "**/.claude/**"]}
+            "claudeMdExcludes": ["**/CLAUDE.md", "**/.claude/**"],
+            "env": {"MCP_TOOL_TIMEOUT": "2000000"}}
 
 
 def run(night, assist_port, data, write):
@@ -27,7 +32,8 @@ def run(night, assist_port, data, write):
         model = "haiku"
     effort = data.get("effort") if data.get("effort") in ("low", "medium", "high") else "low"
     try:
-        timeout = max(30, min(600, int(data.get("timeout") or 240)))
+        # 대화 중 손에게 맡긴 일(최대 30분)을 기다리는 몫까지.
+        timeout = max(30, min(2400, int(data.get("timeout") or 240)))
     except (TypeError, ValueError):
         timeout = 240
     w = night.win()
@@ -57,4 +63,46 @@ def run(night, assist_port, data, write):
             pass
     if last is None:
         why = "시간이 넘어 멈췄어" if killed else (tail.strip()[-300:] or f"claude 가 답 없이 끝났어 ({code})")
+        write({"type": "chii_error", "error": why})
+
+
+# 대화하는 머리는 손이 없다(위 run). 대장이 "받아 봐", "깔아 봐", "됐는지 봐" 처럼 PC 에서 실제로 할 일을 시키면
+# 하치와레가 do_work 도구로 이 손에게 넘긴다. 손은 대장이 평소 쓰는 그대로의 Claude Code 다: 사용자 폴더에서,
+# 대장의 CLAUDE.md·메모리·설정·로그인을 다 읽고, 세션을 남겨 치이스페나 `claude --resume` 으로 이어 볼 수 있다.
+# 그래서 "메모리 동기화 됐어?" 같은 물음도 대장의 메모리를 읽고 답한다.
+# 운영 서버(ssh·scp)만 막는다. 니나브 운영 서버를 실수로 건드리면 되돌리기 어렵고, 대화창에서 그럴 일은 없다.
+WORK_DENY = ["Bash(ssh:*)", "Bash(scp:*)"]
+WORK_RULES = """너는 하치와레의 손이다. 대장이 chiiOS 홈 화면의 하치와레 대화창에서 이 PC 에 시킨 일을 한다.
+대장은 화면 앞에 없을 수 있어 중간에 물어볼 수 없다. 뜻이 둘로 갈리면 덜 위험한 쪽으로 하고, 무엇을 골랐는지 보고에 적는다.
+
+규칙
+- 대장의 CLAUDE.md 와 메모리를 따른다. 메모리 속 경로는 노트북 기준일 수 있으니 기기 목록 메모리에서 이 PC 자리로 바꿔 읽는다.
+- 푸시·배포·운영 서버 접속·결제·계정 설정처럼 밖으로 나가거나 되돌리기 어려운 일은 맡긴 말에 분명히 있을 때만 한다.
+- 지우거나 덮어쓰기 전에 대상을 먼저 본다.
+- 이미 된 일이면 다시 하지 말고 됐다고 확인만 한다.
+
+마지막 답은 하치와레가 대장에게 그대로 전한다. 한국어 반말, 다섯 줄 안팎, 줄마다 "- " 로 시작하고 마크다운 제목·표·굵게는
+쓰지 않는다. 한 일, 확인한 것, 못 한 것과 그 이유를 적는다. 추측은 추측이라고 적는다.
+
+맡긴 일
+"""
+
+
+def work(night, data, write):
+    """data: {task, timeout}. 손 Claude Code 를 대장 사용자 폴더에서 돌리고 사건을 write 로 흘린다."""
+    task = str(data.get("task") or "").strip()[:8000]
+    if not task:
+        write({"type": "chii_error", "error": "맡길 일이 비었어"})
+        return
+    try:
+        timeout = max(60, min(1800, int(data.get("timeout") or 1200)))
+    except (TypeError, ValueError):
+        timeout = 1200
+    w = night.win()
+    # --disallowedTools 는 뒤의 인자를 다 먹으니 맨 끝에 둔다.
+    args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions",
+            "--disallowedTools", *WORK_DENY]
+    code, last, killed, tail = night._claude(args, linux_path(w["home"]), WORK_RULES + task, timeout, on_event=write)
+    if last is None:
+        why = f"{timeout // 60}분이 넘어 멈췄어" if killed else (tail.strip()[-300:] or f"claude 가 답 없이 끝났어 ({code})")
         write({"type": "chii_error", "error": why})

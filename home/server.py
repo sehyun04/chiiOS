@@ -797,7 +797,7 @@ class Handler(BaseHTTPRequestHandler):
             ok, err = start_update()
             return self.send_json({"ok": True} if ok else {"error": err}, 200 if ok else 409)
 
-        if u.path == "/api/claude":
+        if u.path in ("/api/claude", "/api/claude/work"):
             # 하치와레 봇(같은 PC 의 컨테이너)만 부르는 문. 다른 기기에서 Tailscale 로 열었을 땐 대화창(/api/assistant/chat)을 쓴다.
             if self.remote:
                 return self.send_error(403)
@@ -815,7 +815,10 @@ class Handler(BaseHTTPRequestHandler):
                     pass
 
             try:
-                brain.run(NIGHT, ASSIST_PORT, data, write)
+                if u.path.endswith("/work"):
+                    brain.work(NIGHT, data, write)
+                else:
+                    brain.run(NIGHT, ASSIST_PORT, data, write)
             except Exception as e:  # noqa: BLE001  claude 를 못 찾는 것까지 하치와레가 말로 전하게 한다.
                 write({"type": "chii_error", "error": str(e)[:300]})
             return None
@@ -829,7 +832,8 @@ class Handler(BaseHTTPRequestHandler):
         # 비서는 따로 도는 봇(bots/assistant)이다. 홈 화면은 말을 넘겨주기만 하고, 비서 문(7683)은
         # 브라우저에 직접 내주지 않는다. 출처 검사를 홈 화면 한곳에서만 하려고.
         try:
-            conn = http.client.HTTPConnection("127.0.0.1", ASSIST_PORT, timeout=600 if stream else 30)
+            # 대화 중 손에게 맡긴 일은 한 단계가 몇 분씩 조용할 수 있다(설치·받기).
+            conn = http.client.HTTPConnection("127.0.0.1", ASSIST_PORT, timeout=2400 if stream else 30)
             conn.request(method, path, body=None if body is None else json.dumps(body),
                          headers={"Host": "localhost", "X-Chii": "1", "Content-Type": "application/json"})
             resp = conn.getresponse()
