@@ -284,6 +284,9 @@
       det.append(ul);
       add("한 일", det);
     }
+    if (run.docsOnly) add("주의", "코드는 못 고치고 문서만 남겼어. 다음 밤에 이 브랜치에서 코드로 이어 갈게");
+    else if (run.pushed) add("다시 시킴", "처음엔 문서만 남겨서 코드로 한 번 더 시켰어");
+    if (run.continues) add("이어서", "지난밤 브랜치에서 이어 했어");
     if (run.dirty) add("남은 변경", `커밋 안 한 파일 ${run.dirty}개 (밤 작업 폴더에 남아 있음)`);
     if (run.sessionId && run.cwd) {
       add("이어 하기", el("code", "mono small", `cd "${run.cwd}" && claude --resume ${run.sessionId}`));

@@ -52,16 +52,26 @@ TRIAGE = """대장의 오늘 할 일을 보고, 하치와레가 대장이 자는
 - repo: 저장소 표의 slug 그대로, 모르면 null. repo 가 null 이거나 night=false 인 저장소면 hachi 가 될 수 없다.
 - size: 1 작음(한두 파일, 한 시간 안) / 2 보통 / 3 큼(설계가 필요하거나 여러 날).
 - why: 그렇게 나눈 까닭, 명사형으로 끝나는 짧은 한 줄(예: "데스크톱 앞 관리자 창 필요", "폰 화면 표시 버그").
-- plan: who 가 hachi 일 때만, 밤에 할 첫 걸음 한 줄. 아니면 "".
+- plan: who 가 hachi 일 때만, 밤에 실제로 만들거나 고칠 코드 한 줄(어느 부분에 무엇을). "설계", "정리", "조사",
+  "메모 작성" 처럼 코드가 안 바뀌는 걸음으로 쓰지 않는다(할 일 자체가 문서 일일 때만 예외). 아니면 "".
 
 JSON 배열만 답한다. 다른 말은 쓰지 않는다.
 [{{"id": "...", "who": "hachi|me|risky", "repo": "owner/name 또는 null", "size": 1, "why": "...", "plan": "..."}}]"""
 
-TASK = """너는 하치와레다. 대장(이 저장소 주인)이 자는 동안 오늘 할 일 하나를 미리 해 둔다. 아침에 대장이 결과를 보고 합칠지 정한다.
+TASK = """너는 하치와레다. 대장(이 저장소 주인)이 자는 동안 오늘 할 일 하나를 실제로 진행해 둔다. 아침에 대장이 결과를 보고 합칠지 정한다.
 
 할 일: {text}
 저장소: {slug} (지금 폴더). 브랜치 {branch} 에서 일한다. 기준 브랜치는 {base}.
 밤에 할 첫 걸음(하치와레가 잡아 둔 것): {plan}
+{prev}
+남길 것
+- 결과는 실제로 동작하는 코드 변경이다. 설계 메모·계획 문서·할 일 목록만 남기는 건 한 일로 치지 않는다
+  (할 일 자체가 문서 일일 때만 예외). 대장은 문서만 남긴 밤을 아무것도 안 한 밤으로 본다.
+- 할 일이 크면 오늘 밤 안에 끝까지 동작하는 가장 쓸모 있는 조각 하나를 골라 코드로 만들고 커밋한다.
+  남은 것은 문서 파일로 쓰지 말고 마지막 보고에 적는다.
+- 무엇을 원하는지 애매하면 저장소의 코드·문서·커밋 기록을 보고 가장 그럴듯한 쪽으로 정해서 만든다.
+  무엇을 골랐는지는 커밋 본문과 보고에 적는다. 묻기만 하고 끝내지 않는다. 대장이 아침에 보고 고르거나 버린다.
+- 이미 된 부분은 다시 만들지 말고 그다음 조각을 한다.
 
 규칙
 - 이 폴더 안에서만 일한다. 다른 폴더·다른 저장소·시스템 설정은 건드리지 않고, 프로그램을 시스템에 깔지 않는다.
@@ -69,15 +79,24 @@ TASK = """너는 하치와레다. 대장(이 저장소 주인)이 자는 동안 
   배포, 서버 접속, 봇이나 서비스 실행, 운영 토큰·실제 데이터 사용은 하지 않는다.
 - 저장소의 CLAUDE.md·AGENTS.md·README 에 적힌 규칙을 먼저 읽고 따른다.
 - 이모지는 코드·주석·커밋·문서 어디에도 쓰지 않는다. 주석은 코드가 말하지 않는 이유만 쓴다.
-- 테스트나 검사가 있으면 돌린다. 도구가 없어 못 돌리면 깔지 말고 마지막 보고에 적는다.
-- 할 일이 생각보다 크면 오늘 밤 끝낼 수 있는 첫 조각만 하고, 남은 것을 보고에 적는다.
-- 무엇을 원하는지 애매해서 추측이 커지면 코드를 고치지 말고, 대장에게 물어볼 것만 정리해서 끝낸다.
+- 테스트나 검사가 있으면 돌린다. 빌드·테스트 도구가 없어도 코드는 고치고, 문법 검사처럼 할 수 있는 확인만 한다.
+  도구는 깔지 않고, 못 돌린 것은 마지막 보고에 적는다.
 - 마친 일은 이 브랜치에 커밋한다. 커밋 제목은 명사형 라벨(예: "폰 화면 작업 중 표시 수정"), 접두사(feat: 등)와
   마침표 없이. 본문은 평서형(~한다)으로 왜 그렇게 했는지. 맨 끝 줄은 "Co-Authored-By: Claude <noreply@anthropic.com>"
   하나만 두고 다른 서명 줄은 넣지 않는다.
 
 마지막 답은 대장에게 하는 아침 보고다. 한국어 반말, 다섯 줄 안팎, 줄마다 "- " 로 시작하고 마크다운 제목·표·굵게는 쓰지 않는다.
 한 일, 확인한 것(테스트), 못 한 것이나 대장에게 물어볼 것을 적는다."""
+
+# 끝나고 보니 바뀐 게 문서뿐이면 같은 대화를 이어 한 번 더 시킨다. 11-22 첫 밤이 "세션 이사" 를 설계 메모 하나로 끝냈다.
+PUSH = """지금까지 이 브랜치에서 바뀐 건 문서뿐이다. 문서·설계 메모는 한 일로 치지 않는다.
+남은 시간 안에 할 일의 다음 조각을 실제 코드로 만들어 커밋해. 애매한 건 가장 그럴듯한 쪽으로 정하고 커밋 본문과 보고에 적어.
+마지막 답은 앞에서 말한 형식의 아침 보고로, 이번 밤 전체에 한 일을 적는다."""
+# 문서로 치는 파일. 할 일이 문서 일이면 문서만 바꿔도 된다.
+DOC_FILE = re.compile(r"(^|/)docs?/|\.(md|markdown|txt|rst|adoc)$", re.I)
+DOC_TODO = re.compile(r"문서|README|리드미|docs?\b|메모|문구|설명서", re.I)
+# 이어서 한 번 더 시킬 만큼 시간이 남았는지.
+PUSH_MIN = 8 * 60
 
 
 def linux_path(win):
@@ -95,6 +114,12 @@ class Night:
         self.triage_due = 0.0
         self._win = None
         self.live = None
+        # 하는 도중 PC 가 꺼지거나 홈 화면이 다시 켜지면 '하는 중' 으로 영영 남아 그 할 일을 다시 못 고른다.
+        for r in self.runs():
+            if r.get("status") == "running":
+                r.update(status="failed", interrupted=True, end=r.get("end") or time.time(),
+                         error="하는 도중 PC 나 홈 화면이 꺼져 멈췄어")
+                self._save_run(r)
 
     # 파일 ------------------------------------------------------------------
 
@@ -339,24 +364,60 @@ class Night:
     # 고르기·하기 -----------------------------------------------------------
 
     def pick(self, todo_id=None):
+        """(할 일, 파악, 이어 갈 지난 밤 작업 또는 None)"""
         tri = self._read("triage.json", {})
-        tried = {(r["todo"]["id"], r["todo"]["text"]) for r in self.runs()
-                 if r.get("todo") and r.get("status") in ("done", "nothing", "failed")}
+        last = {}
+        for r in self.runs():
+            if r.get("todo"):
+                last[(r["todo"]["id"], r["todo"]["text"])] = r
         cands = []
         for t in self.todos():
             e = tri.get(t["id"])
             if t.get("done") or not e or e.get("text") != t["text"] or not e.get("repo"):
                 continue
+            prev = last.get((t["id"], t["text"]))
+            cont = prev if prev and not prev.get("resolved") and self._docs_only_run(prev) else None
             if todo_id:
                 if t["id"] == todo_id:
-                    return t, e
+                    return t, e, cont
                 continue
-            if self.who(e) == "hachi" and (t["id"], t["text"]) not in tried:
-                cands.append((e.get("size", 2), t.get("createdAt") or 0, t, e))
+            if self.who(e) == "hachi" and self._again(prev):
+                cands.append((e.get("size", 2), t.get("createdAt") or 0, t, e, cont))
         cands.sort(key=lambda c: (c[0], c[1]))
-        return (cands[0][2], cands[0][3]) if cands else None
+        return tuple(cands[0][2:]) if cands else None
 
-    def prepare(self, slug, branch):
+    def _again(self, prev):
+        """이 할 일을 오늘 밤 또 해도 되는지. 큰 일은 한 밤에 안 끝나니 대장이 합치면 다음 밤에 다음 조각을 한다.
+        합치기 전엔 기다린다(같은 일을 두 번 하지 않게). 문서만 남긴 밤은 한 걸로 치지 않고 그 브랜치에서 이어 간다."""
+        if not prev or prev.get("interrupted"):
+            return True
+        if prev.get("status") != "done":
+            return False
+        if prev.get("resolved") == "merged":
+            return True
+        return not prev.get("resolved") and self._docs_only_run(prev)
+
+    def _files(self, windir, start, end="HEAD"):
+        code, out = self._git(windir, "diff", "--name-only", f"{start}...{end}")
+        return [x.strip() for x in out.splitlines() if x.strip()] if code == 0 else None
+
+    @staticmethod
+    def _docs_only(files, text):
+        return bool(files) and not DOC_TODO.search(text) and all(DOC_FILE.search(f) for f in files)
+
+    def _docs_only_run(self, r):
+        if r.get("status") != "done":
+            return False
+        if "docsOnly" not in r:
+            # 이 판정이 생기기 전의 밤 작업은 받아 둔 사본에서 다시 본다.
+            files = self._files(r["cwd"], f"origin/{r['base']}", r["branch"]) if r.get("cwd") and r.get("base") else None
+            if files is None:
+                return False
+            r["docsOnly"] = self._docs_only(files, r["todo"]["text"])
+            self._save_run(r)
+        return bool(r["docsOnly"])
+
+    def prepare(self, slug, branch, cont=None):
         w = self.win()
         info = self.repo(slug) or {}
         url = info.get("url") or f"https://github.com/{slug}.git"
@@ -378,7 +439,13 @@ class Night:
         base = head.strip().split("/", 1)[1] if code == 0 and "/" in head else "main"
         self._git(windir, "reset", "--hard")
         self._git(windir, "clean", "-fd")
-        code, out = self._git(windir, "checkout", "-B", branch, f"origin/{base}")
+        start = f"origin/{base}"
+        if cont:
+            # 지난밤 올린 브랜치에서 이어 간다. GitHub 에서 지워졌으면 기준 브랜치에서 새로.
+            code, _ = self._git(windir, "rev-parse", "--verify", "--quiet", f"origin/{branch}")
+            if code == 0:
+                start = f"origin/{branch}"
+        code, out = self._git(windir, "checkout", "-B", branch, start)
         if code:
             raise RuntimeError(f"브랜치를 못 만들었어: {out.strip()[-160:]}")
         guard = self._guard_config()
@@ -391,24 +458,36 @@ class Night:
             self._git(windir, "config", "user.email", f"{owner}@users.noreply.github.com")
         return windir, base, url, guard
 
-    def run_task(self, t, e, reason):
+    def run_task(self, t, e, cont, reason):
         slug = e["repo"]
         now = datetime.now()
-        branch = f"hachi/{now:%m%d}-{t['id']}"
+        branch = cont["branch"] if cont else f"hachi/{now:%m%d}-{t['id']}"
         run = {"id": now.strftime("%Y%m%d-%H%M%S"), "t": time.time(), "todo": {"id": t["id"], "text": t["text"]},
-               "repo": slug, "branch": branch, "status": "running", "reason": reason, "steps": 0}
+               "repo": slug, "branch": branch, "status": "running", "reason": reason, "steps": 0,
+               "continues": cont["id"] if cont else None}
+        if cont:
+            # 지난밤 카드는 이 밤 작업으로 넘어간다. 브랜치와 합치기·버리기 단추는 새 카드가 이어 쥔다.
+            cont["resolved"] = "continued"
+            cont["resolvedAt"] = time.time()
+            self._save_run(cont)
         self.live = run
         self._save_run(run)
-        self.log_event("night", f"하치와레 밤 작업 시작 · {t['text']}")
+        self.log_event("night", f"하치와레 밤 작업 시작 · {t['text']}" + (" (지난밤 브랜치 이어서)" if cont else ""))
         try:
-            windir, base, url, guard = self.prepare(slug, branch)
+            windir, base, url, guard = self.prepare(slug, branch, cont)
             run.update(base=base, cwd=windir)
             self._save_run(run)
+            _, start = self._git(windir, "rev-parse", "HEAD")
+            start = start.strip()
             s = self.settings()
-            args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions"]
-            if s.get("model"):
-                args += ["--model", s["model"]]
-            args += ["--disallowedTools", *DENY]
+            model = ["--model", s["model"]] if s.get("model") else []
+            tail_args = ["--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions",
+                         *model, "--disallowedTools", *DENY]
+            args = ["-p", *tail_args]
+            prev = ""
+            if cont:
+                done_before = "; ".join(c["subject"] for c in cont.get("commits") or [])
+                prev = (f"지난밤 이 브랜치에 문서만 남겼다({done_before}). 그 내용은 참고만 하고 이번 밤엔 코드로 진행한다.\n")
 
             def on_event(ev):
                 if ev.get("type") == "system" and ev.get("session_id"):
@@ -420,13 +499,25 @@ class Night:
 
             log = self.dir / "logs" / f"{run['id']}.jsonl"
             log.parent.mkdir(parents=True, exist_ok=True)
+            t0 = time.time()
             code, res, timed_out, tail = self._claude(
                 args, linux_path(windir), TASK.format(text=t["text"], slug=slug, branch=branch, base=base,
-                                                      plan=e.get("plan") or "(없음, 직접 정한다)"),
+                                                      plan=e.get("plan") or "(없음, 직접 정한다)", prev=prev),
                 timeout=s["minutes"] * 60, guard=guard, on_event=on_event, log_path=log)
             res = res or {}
-            run["summary"] = (res.get("result") or "").strip()[:4000]
             run["sessionId"] = res.get("session_id") or run.get("sessionId")
+            left = s["minutes"] * 60 - (time.time() - t0)
+            if (not timed_out and run.get("sessionId") and left >= PUSH_MIN
+                    and self._docs_only(self._files(windir, start) or [], t["text"])):
+                self.log_event("night", f"하치와레 밤 작업 · 문서만 남겨서 코드로 한 번 더 · {t['text']}")
+                run["pushed"] = True
+                code, res2, timed_out, tail = self._claude(
+                    ["-p", "--resume", run["sessionId"], *tail_args], linux_path(windir), PUSH,
+                    timeout=int(left), guard=guard, on_event=on_event, log_path=log)
+                if res2:
+                    res = res2
+                    run["sessionId"] = res2.get("session_id") or run["sessionId"]
+            run["summary"] = (res.get("result") or "").strip()[:4000]
             if timed_out:
                 run["error"] = f"{s['minutes']}분이 넘어 멈췄어"
             elif res.get("is_error") or code not in (0, None):
@@ -437,6 +528,7 @@ class Night:
             run["commits"] = commits
             run["dirty"] = len([ln for ln in st.splitlines() if ln.strip()])
             if commits:
+                run["docsOnly"] = self._docs_only(self._files(windir, f"origin/{base}") or [], t["text"])
                 code, out = self._git(windir, "push", "--force", url, f"HEAD:refs/heads/{branch}", timeout=600)
                 if code:
                     run["error"] = f"브랜치를 못 올렸어: {out.strip()[-160:]}"
@@ -453,8 +545,8 @@ class Night:
             run["end"] = time.time()
             self.live = None
             self._save_run(run)
-            word = {"done": f"커밋 {len(run.get('commits') or [])}개 올림", "nothing": "고친 것 없음",
-                    "failed": "못 끝냄"}.get(run["status"], run["status"])
+            word = {"done": f"커밋 {len(run.get('commits') or [])}개 올림" + (" · 문서만" if run.get("docsOnly") else ""),
+                    "nothing": "고친 것 없음", "failed": "못 끝냄"}.get(run["status"], run["status"])
             self.log_event("night", f"하치와레 밤 작업 · {t['text']} · {word}")
         return run
 
@@ -560,7 +652,7 @@ class Night:
         last = self.live or (runs[-1] if runs else None)
         show = last if last and (last["status"] == "running" or not last.get("resolved")) else None
         keys = ("id", "t", "end", "todo", "repo", "branch", "base", "status", "summary", "commits", "dirty",
-                "compare", "sessionId", "cwd", "error", "steps", "reason")
+                "compare", "sessionId", "cwd", "error", "steps", "reason", "docsOnly", "pushed", "continues")
         return {
             "enabled": s["enabled"], "at": s["at"], "busy": self.job.locked(), "triaging": self.triaging.locked(),
             "triage": {k: {"who": self.who(v), "auto": v.get("who"), "repo": v.get("repo"), "size": v.get("size"),
